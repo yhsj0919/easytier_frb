@@ -1,0 +1,35 @@
+[package]
+name = "rust_lib_easytier_frb"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+flutter_rust_bridge = "=2.12.0"
+lazy_static = "1.4"
+serde_json = "1.0"
+tokio = { version = "1.39", features = ["rt-multi-thread", "sync", "macros"] }
+uuid = { version = "1.0", features = ["v4"] }
+
+# 与 astral 相同：从 GitHub 拉取 EasyTier 源码（无本地路径）
+easytier = { git = "https://github.com/EasyTier/EasyTier.git", rev = "8428a89d2dabc94c97d370ec607c6ca142473626", default-features = false, features = [
+    "wireguard",
+    "websocket",
+    "quic",
+    "tun",
+    "smoltcp",
+    "socks5",
+    "kcp",
+    "faketcp",
+    "magic-dns",
+    "zstd",
+] }
+
+[build-dependencies]
+cargo_metadata = "0.18"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

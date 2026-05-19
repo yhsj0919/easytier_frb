@@ -1,0 +1,28 @@
+plugins {
+    id "com.android.library"
+}
+
+group = "xyz.yhsj.easytier_frb"
+version = "1.0-SNAPSHOT"
+
+android {
+    namespace = "xyz.yhsj.easytier_frb"
+    compileSdk = 35
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+
+    sourceSets {
+        main.java.srcDirs += "src/main/kotlin"
+    }
+
+    defaultConfig {
+        minSdk = 21
+    }
+}
+
+dependencies {
+    implementation("org.jetbrains.kotlin:kotlin-stdlib")
+}
