@@ -33,3 +33,11 @@ cargo_metadata = "0.18"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+
+# Android/iOS/desktop release：偏向缩小 .so / dylib 体积（LTO 会明显拉长编译时间）
+#[profile.release]
+#opt-level = "z"
+#lto = true
+#codegen-units = 1
+#panic = "abort"
+#strip = true
