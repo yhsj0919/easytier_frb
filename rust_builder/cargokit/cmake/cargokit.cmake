@@ -39,6 +39,16 @@ function(apply_cargokit target manifest_dir lib_name any_symbol_name)
         get_filename_component(CARGOKIT_MANIFEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${manifest_dir}" ABSOLUTE)
     endif()
 
+    # Rebuild only when Rust sources or manifest change (not on every flutter run).
+    file(GLOB_RECURSE CARGOKIT_RUST_SOURCES CONFIGURE_DEPENDS
+        "${CARGOKIT_MANIFEST_DIR}/src/*.rs"
+    )
+    foreach(_cargokit_extra Cargo.toml Cargo.lock build.rs cargokit.yaml)
+        if(EXISTS "${CARGOKIT_MANIFEST_DIR}/${_cargokit_extra}")
+            list(APPEND CARGOKIT_RUST_SOURCES "${CARGOKIT_MANIFEST_DIR}/${_cargokit_extra}")
+        endif()
+    endforeach()
+
     set(CARGOKIT_ENV
         "CARGOKIT_CMAKE=${CMAKE_COMMAND}"
         "CARGOKIT_CONFIGURATION=$<CONFIG>"
@@ -65,9 +75,9 @@ function(apply_cargokit target manifest_dir lib_name any_symbol_name)
             add_custom_command(
                 OUTPUT
                 "${CMAKE_CURRENT_BINARY_DIR}/${CONFIG}/${CARGOKIT_LIB_FULL_NAME}"
-                "${CMAKE_CURRENT_BINARY_DIR}/_phony_"
                 COMMAND ${CMAKE_COMMAND} -E env ${CARGOKIT_ENV}
                 "${cargokit_cmake_root}/run_build_tool${SCRIPT_EXTENSION}" build-cmake
+                DEPENDS ${CARGOKIT_RUST_SOURCES}
                 VERBATIM
             )
         endforeach()
@@ -75,15 +85,12 @@ function(apply_cargokit target manifest_dir lib_name any_symbol_name)
         add_custom_command(
             OUTPUT
             ${OUTPUT_LIB}
-            "${CMAKE_CURRENT_BINARY_DIR}/_phony_"
             COMMAND ${CMAKE_COMMAND} -E env ${CARGOKIT_ENV}
             "${cargokit_cmake_root}/run_build_tool${SCRIPT_EXTENSION}" build-cmake
+            DEPENDS ${CARGOKIT_RUST_SOURCES}
             VERBATIM
         )
     endif()
-
-
-    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/_phony_" PROPERTIES SYMBOLIC TRUE)
 
     if (TARGET ${target})
         # If we have actual cmake target provided create target and make existing
@@ -95,7 +102,7 @@ function(apply_cargokit target manifest_dir lib_name any_symbol_name)
             target_link_options(${target} PRIVATE "/INCLUDE:${any_symbol_name}")
         endif()
     else()
-        # Otherwise (FFI) just use ALL to force building always
+        # FFI plugin: build when OUTPUT_LIB is missing or Rust sources are newer.
         add_custom_target("${target}_cargokit" ALL DEPENDS ${OUTPUT_LIB})
     endif()
 

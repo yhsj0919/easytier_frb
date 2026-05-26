@@ -2,6 +2,11 @@
 
 import java.nio.file.Paths
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.gradle.api.file.FileCollection
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.process.ExecOperations
 
 import javax.inject.Inject
@@ -45,7 +50,24 @@ abstract class CargoKitBuildTask extends DefaultTask {
     String pluginFile
 
     @Input
+    String manifestDirPath
+
+    @Input
     List<String> targetPlatforms
+
+    @OutputDirectory
+    File getNativeLibsOutput() {
+        return project.file(outputDir)
+    }
+
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    FileCollection getRustSourceInputs() {
+        def dir = project.file(manifestDirPath).canonicalFile
+        return project.fileTree(dir) {
+            include "**/*.rs", "Cargo.toml", "Cargo.lock", "build.rs", "cargokit.yaml"
+        }
+    }
 
     @TaskAction
     def build() {
@@ -60,7 +82,7 @@ abstract class CargoKitBuildTask extends DefaultTask {
         // pluginFile is .../cargokit/gradle/plugin.gradle; manifestDir is relative to cargokit/
         def cargokitDir = new File(pluginFile).parentFile.parentFile
         def path = Paths.get(cargokitDir.absolutePath, executableName).toAbsolutePath().toString()
-        def manifestDir = Paths.get(cargokitDir.absolutePath, project.cargokit.manifestDir).toAbsolutePath().toString()
+        def manifestDir = new File(cargokitDir, project.cargokit.manifestDir).canonicalPath
         def rootProjectDir = project.rootProject.projectDir.absolutePath
 
         if (!Os.isFamily(Os.FAMILY_WINDOWS)) {
@@ -172,6 +194,12 @@ class CargoKitPlugin implements Plugin<Project> {
                     throw new GradleException("Please set 'android.ndkVersion' in app/build.gradle.")
                 }
 
+                def cargokitDir = new File(CargoKitPlugin.file).parentFile.parentFile
+                def manifestDirAbsolute = new File(
+                    cargokitDir,
+                    project.cargokit.manifestDir,
+                ).canonicalPath
+
                 def task = project.tasks.create(taskName, CargoKitBuildTask.class) {
                     buildMode = variant.buildType.name
                     buildDir = cargoBuildDir
@@ -182,12 +210,15 @@ class CargoKitPlugin implements Plugin<Project> {
                     compileSdkVersion = parseCompileSdkVersion(plugin.project.android.compileSdkVersion)
                     targetPlatforms = platforms
                     pluginFile = CargoKitPlugin.file
+                    manifestDirPath = manifestDirAbsolute
                 }
 
+                def mergeTaskPrefix = "merge${buildType.capitalize()}"
                 def onTask = { newTask ->
-                    if (newTask.name == "merge${buildType.capitalize()}NativeLibs") {
+                    // AGP 8+/9: NativeLibs and JniLibFolders merges both read jniLibs output.
+                    if (newTask.name == "${mergeTaskPrefix}NativeLibs" ||
+                        newTask.name == "${mergeTaskPrefix}JniLibFolders") {
                         newTask.dependsOn task
-                        newTask.outputs.upToDateWhen { false }
                     }
                 }
                 project.tasks.each onTask

@@ -44,6 +44,101 @@ class Artifact {
 
 final _log = Logger('artifacts_provider');
 
+const _sourceHashStampFile = 'cargokit_source_hash';
+
+String _cargoProfileDir(BuildConfiguration configuration) {
+  return switch (configuration) {
+    BuildConfiguration.debug => 'debug',
+    BuildConfiguration.release => 'release',
+    BuildConfiguration.profile => 'release',
+  };
+}
+
+bool _cargoArtifactsUpToDate({
+  required Target target,
+  required BuildEnvironment environment,
+}) {
+  final stamp = File(
+    path.join(environment.targetTempDir, _sourceHashStampFile),
+  );
+  if (!stamp.existsSync()) {
+    return false;
+  }
+  final hash = CrateHash.compute(
+    environment.manifestDir,
+    tempStorage: environment.targetTempDir,
+  );
+  if (stamp.readAsStringSync() != hash) {
+    return false;
+  }
+  final targetDir = path.join(
+    environment.targetTempDir,
+    target.rust,
+    _cargoProfileDir(environment.configuration),
+  );
+  final names = <String>{
+    ...getArtifactNames(
+      target: target,
+      libraryName: environment.crateInfo.packageName,
+      aritifactType: AritifactType.dylib,
+      remote: false,
+    ),
+    ...getArtifactNames(
+      target: target,
+      libraryName: environment.crateInfo.packageName,
+      aritifactType: AritifactType.staticlib,
+      remote: false,
+    ),
+  };
+  for (final name in names) {
+    if (!File(path.join(targetDir, name)).existsSync()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+List<Artifact> _loadCargoArtifacts({
+  required Target target,
+  required BuildEnvironment environment,
+}) {
+  final targetDir = path.join(
+    environment.targetTempDir,
+    target.rust,
+    _cargoProfileDir(environment.configuration),
+  );
+  final names = <String>{
+    ...getArtifactNames(
+      target: target,
+      libraryName: environment.crateInfo.packageName,
+      aritifactType: AritifactType.dylib,
+      remote: false,
+    ),
+    ...getArtifactNames(
+      target: target,
+      libraryName: environment.crateInfo.packageName,
+      aritifactType: AritifactType.staticlib,
+      remote: false,
+    ),
+  };
+  return names
+      .map((name) => Artifact(
+            path: path.join(targetDir, name),
+            finalFileName: name,
+          ))
+      .where((a) => File(a.path).existsSync())
+      .toList();
+}
+
+void _recordSuccessfulCargoBuild(BuildEnvironment environment) {
+  final hash = CrateHash.compute(
+    environment.manifestDir,
+    tempStorage: environment.targetTempDir,
+  );
+  File(path.join(environment.targetTempDir, _sourceHashStampFile))
+      .writeAsStringSync(hash);
+}
+
 class ArtifactProvider {
   ArtifactProvider({
     required this.environment,
@@ -64,11 +159,26 @@ class ArtifactProvider {
     }
 
     final rustup = Rustup();
-    for (final target in targets) {
+    for (final target in pendingTargets) {
+      if (_cargoArtifactsUpToDate(target: target, environment: environment)) {
+        final artifacts = _loadCargoArtifacts(
+          target: target,
+          environment: environment,
+        );
+        if (artifacts.isNotEmpty) {
+          _log.info(
+            'Skipping cargo build for ${environment.crateInfo.packageName} ($target): sources unchanged',
+          );
+          result[target] = artifacts;
+          continue;
+        }
+      }
+
       final builder = RustBuilder(target: target, environment: environment);
       builder.prepare(rustup);
       _log.info('Building ${environment.crateInfo.packageName} for $target');
       final targetDir = await builder.build();
+      _recordSuccessfulCargoBuild(environment);
       // For local build accept both static and dynamic libraries.
       final artifactNames = <String>{
         ...getArtifactNames(

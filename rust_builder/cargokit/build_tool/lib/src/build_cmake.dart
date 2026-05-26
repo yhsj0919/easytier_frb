@@ -5,11 +5,15 @@ import 'dart:io';
 
 import 'package:path/path.dart' as path;
 
+import 'package:logging/logging.dart';
+
 import 'artifacts_provider.dart';
 import 'builder.dart';
 import 'environment.dart';
 import 'options.dart';
 import 'target.dart';
+
+final _log = Logger('build_cmake');
 
 class BuildCMake {
   final CargokitUserOptions userOptions;
@@ -32,8 +36,17 @@ class BuildCMake {
 
     for (final lib in libs) {
       if (lib.type == AritifactType.dylib) {
-        File(lib.path)
-            .copySync(path.join(Environment.outputDir, lib.finalFileName));
+        final dest = path.join(Environment.outputDir, lib.finalFileName);
+        final destFile = File(dest);
+        final sourceFile = File(lib.path);
+        if (destFile.existsSync() &&
+            destFile.lastModifiedSync().isAfter(
+                  sourceFile.lastModifiedSync(),
+                )) {
+          _log.fine('Skipping copy of ${lib.finalFileName}: already up to date');
+          continue;
+        }
+        sourceFile.copySync(dest);
       }
     }
   }
