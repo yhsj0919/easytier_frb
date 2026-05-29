@@ -6,9 +6,9 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('reads easytier version in-process', (WidgetTester tester) async {
-    final rust = EasytierRust.instance;
-    await rust.init();
-    final version = await rust.easytierVersion();
-    expect(version.isNotEmpty, true);
+    final easyTier = EasyTier();
+    await easyTier.initialize();
+    expect(easyTier.coreVersion?.isNotEmpty, true);
+    easyTier.dispose();
   });
 }

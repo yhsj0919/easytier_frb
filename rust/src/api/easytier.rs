@@ -1,6 +1,8 @@
 //! EasyTier 多实例 FRB API（参考 astral `p2p.rs`，无业务层封装）。
 
+use crate::frb_generated::StreamSink;
 use easytier::common::config::{ConfigFileControl, ConfigLoader, TomlConfigLoader};
+use easytier::common::global_ctx::GlobalCtxEvent;
 use easytier::instance_manager::NetworkInstanceManager;
 use lazy_static::lazy_static;
 use serde_json::json;
@@ -37,7 +39,9 @@ pub fn easytier_version() -> String {
 }
 
 pub fn parse_config(toml: String) -> Result<(), String> {
-    TomlConfigLoader::new_from_str(&toml).map(|_| ()).map_err(|e| e.to_string())
+    TomlConfigLoader::new_from_str(&toml)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 pub fn run_network_from_toml(toml: String) -> Result<String, String> {
@@ -92,7 +96,78 @@ fn ipv4_inet_to_host(v4: &Option<easytier::proto::common::Ipv4Inet>) -> Option<S
 }
 
 pub async fn get_running_info_json(instance_id: String) -> String {
-    let info = match get_instance_info(&instance_id).await {
+    let Ok(id) = parse_instance_id(&instance_id) else {
+        return "null".to_string();
+    };
+    build_running_info_json(&id).await
+}
+
+pub fn is_instance_running(instance_id: String) -> bool {
+    let Ok(id) = parse_instance_id(&instance_id) else {
+        return false;
+    };
+    MANAGER.list_network_instance_ids().contains(&id)
+}
+
+fn instance_event_receiver(
+    instance_id: &Uuid,
+) -> Option<easytier::common::global_ctx::EventBusSubscriber> {
+    MANAGER
+        .iter()
+        .find(|item| item.key() == instance_id)
+        .and_then(|item| item.value().subscribe_event())
+}
+
+fn instance_stop_notifier(instance_id: &Uuid) -> Option<std::sync::Arc<tokio::sync::Notify>> {
+    MANAGER
+        .iter()
+        .find(|item| item.key() == instance_id)
+        .and_then(|item| item.value().get_stop_notifier())
+}
+
+fn running_info_triggers_refresh(event: &GlobalCtxEvent) -> bool {
+    !matches!(
+        event,
+        GlobalCtxEvent::Connecting(_)
+            | GlobalCtxEvent::ConnectError(_, _, _)
+            | GlobalCtxEvent::ConnectionAccepted(_, _)
+            | GlobalCtxEvent::ConnectionError(_, _, _)
+            | GlobalCtxEvent::ListenerAcceptFailed(_, _)
+    )
+}
+
+fn push_session_message(sink: &StreamSink<String>, value: serde_json::Value) {
+    let _ = sink.add(value.to_string());
+}
+
+async fn push_snapshot(instance_id: &Uuid, sink: &StreamSink<String>) {
+    let json = build_running_info_json(instance_id).await;
+    push_session_message(
+        sink,
+        json!({
+            "type": "snapshot",
+            "json": json,
+        }),
+    );
+}
+
+fn push_core_event(sink: &StreamSink<String>, event: &GlobalCtxEvent) {
+    let event_value = serde_json::to_value(event).unwrap_or(json!(null));
+    push_session_message(
+        sink,
+        json!({
+            "type": "core_event",
+            "event": event_value,
+        }),
+    );
+}
+
+fn push_stopped(sink: &StreamSink<String>) {
+    push_session_message(sink, json!({ "type": "stopped" }));
+}
+
+async fn build_running_info_json(instance_id: &Uuid) -> String {
+    let info = match get_instance_info(&instance_id.to_string()).await {
         Ok(info) => info,
         Err(_) => return "null".to_string(),
     };
@@ -109,13 +184,72 @@ pub async fn get_running_info_json(instance_id: String) -> String {
         "routes": info.routes,
         "peer_route_pairs": info.peer_route_pairs,
         "peer_count": info.peers.len(),
+        "error_msg": info.error_msg,
     }))
     .unwrap_or_else(|_| "null".to_string())
 }
 
-pub fn is_instance_running(instance_id: String) -> bool {
+/// 订阅实例会话：核心事件 + 快照 + stopped。
+pub async fn watch_session(instance_id: String, sink: StreamSink<String>) {
     let Ok(id) = parse_instance_id(&instance_id) else {
-        return false;
+        push_stopped(&sink);
+        return;
     };
-    MANAGER.list_network_instance_ids().contains(&id)
+
+    let Some(mut events) = instance_event_receiver(&id) else {
+        push_snapshot(&id, &sink).await;
+        push_stopped(&sink);
+        return;
+    };
+
+    push_snapshot(&id, &sink).await;
+
+    let stop_notifier = instance_stop_notifier(&id);
+    let mut traffic_tick = tokio::time::interval(std::time::Duration::from_secs(1));
+    traffic_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    loop {
+        if !MANAGER.list_network_instance_ids().contains(&id) {
+            push_stopped(&sink);
+            break;
+        }
+
+        tokio::select! {
+            _ = async {
+                if let Some(notifier) = stop_notifier.as_ref() {
+                    notifier.notified().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {
+                push_stopped(&sink);
+                break;
+            }
+            event = events.recv() => {
+                match event {
+                    Ok(event) => {
+                        push_core_event(&sink, &event);
+                        if running_info_triggers_refresh(&event) {
+                            push_snapshot(&id, &sink).await;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        if let Some(new_events) = instance_event_receiver(&id) {
+                            events = new_events;
+                        } else {
+                            events = events.resubscribe();
+                        }
+                        push_snapshot(&id, &sink).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        push_stopped(&sink);
+                        break;
+                    }
+                }
+            }
+            _ = traffic_tick.tick() => {
+                push_snapshot(&id, &sink).await;
+            }
+        }
+    }
 }

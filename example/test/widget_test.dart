@@ -7,7 +7,7 @@ class _MockApi implements RustLibApi {
   Future<void> crateApiEasytierInitApp() async {}
 
   @override
-  Future<String> crateApiEasytierEasytierVersion() async => '2.4.5';
+  Future<String> crateApiEasytierEasytierVersion() async => '2.6.4';
 
   @override
   Future<void> crateApiEasytierParseConfig({required String toml}) async {}
@@ -41,6 +41,17 @@ class _MockApi implements RustLibApi {
     required String instanceId,
   }) async =>
       true;
+
+  @override
+  Stream<String> crateApiEasytierWatchSession({
+    required String instanceId,
+  }) =>
+      Stream<String>.value(
+        '{"type":"snapshot","json":"{\\"dev_name\\":\\"et0\\",'
+        '\\"my_node_info\\":{\\"hostname\\":\\"test\\",\\"version\\":\\"2.0\\",'
+        '\\"virtual_ipv4\\":{\\"address\\":{\\"addr\\":168430599},'
+        '\\"network_length\\":24}},\\"routes\\":[],\\"peer_route_pairs\\":[]}"}',
+      );
 }
 
 void main() {

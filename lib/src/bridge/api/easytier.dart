@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `get_instance_info`, `parse_instance_id`
+// These functions are ignored because they are not marked as `pub`: `build_running_info_json`, `get_instance_info`, `instance_event_receiver`, `instance_stop_notifier`, `ipv4_inet_to_host`, `parse_instance_id`, `push_core_event`, `push_session_message`, `push_snapshot`, `push_stopped`, `running_info_triggers_refresh`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `MANAGER`, `RT`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `deref`, `deref`, `initialize`, `initialize`
 
@@ -42,3 +42,7 @@ Future<bool> isInstanceRunning({required String instanceId}) => RustLib
     .instance
     .api
     .crateApiEasytierIsInstanceRunning(instanceId: instanceId);
+
+/// 订阅实例会话：核心事件 + 快照 + stopped。
+Stream<String> watchSession({required String instanceId}) =>
+    RustLib.instance.api.crateApiEasytierWatchSession(instanceId: instanceId);

@@ -1,13 +1,14 @@
 import 'dart:async';
 
 import 'package:easytier_frb/easytier_frb.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ConnectionState;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const ExampleApp());
 }
 
+/// EasyTier FRB 示例：TOML 连接、错误横幅、对端流量流展示。
 class ExampleApp extends StatefulWidget {
   const ExampleApp({super.key});
 
@@ -16,36 +17,57 @@ class ExampleApp extends StatefulWidget {
 }
 
 class _ExampleAppState extends State<ExampleApp> {
-  static const _exampleConfigId = '11111111-1111-1111-1111-111111111111';
-
-  final EasytierController _controller = EasytierController();
+  final EasyTier _easyTier = EasyTier();
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
       GlobalKey<ScaffoldMessengerState>();
+  final TextEditingController _tomlController = TextEditingController(
+    text: _defaultToml,
+  );
 
-  late final TextEditingController _accountController;
-  late final TextEditingController _passwordController;
-  late final TextEditingController _seedNodeController;
-  late final TextEditingController _virtualIpController;
-  late final NetworkConfig _config;
-
+  StreamSubscription<EasyTierEvent>? _eventSub;
+  bool _peersAutoRefresh = true;
+  bool _trafficAutoRefresh = true;
   bool _initializing = true;
   String? _initError;
+
+  static const _defaultToml = '''
+instance_name = "frb-example"
+hostname = "frb-example"
+listeners = ["tcp://0.0.0.0:11010"]
+
+[network_identity]
+network_name = "system_palsmon"
+network_secret = "system_palsmon"
+[[peer]]
+uri = "tcp://47.93.195.55:11010"
+''';
 
   @override
   void initState() {
     super.initState();
-    _config = NetworkConfig.fromToml(_initialToml(), id: _exampleConfigId);
-    _accountController = TextEditingController();
-    _passwordController = TextEditingController();
-    _seedNodeController = TextEditingController();
-    _virtualIpController = TextEditingController();
+    _easyTier.listenable.addListener(_onEasyTierChanged);
+    _eventSub = _easyTier.events.listen(_onEvent);
     unawaited(_bootstrap());
   }
 
+  @override
+  void dispose() {
+    _eventSub?.cancel();
+    _easyTier.listenable.removeListener(_onEasyTierChanged);
+    _tomlController.dispose();
+    _easyTier.dispose();
+    super.dispose();
+  }
+
+  /// [EasyTier.listenable] 回调：刷新连接状态等 Pull 数据。
+  void _onEasyTierChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// 应用启动时初始化 [EasyTier]。
   Future<void> _bootstrap() async {
     try {
-      await _controller.initialize(initialConfigs: <NetworkConfig>[_config]);
-      _syncInputFieldsFromConfig();
+      await _easyTier.initialize();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -55,459 +77,261 @@ class _ExampleAppState extends State<ExampleApp> {
       }
       return;
     }
-    if (mounted) {
-      setState(() => _initializing = false);
+    if (mounted) setState(() => _initializing = false);
+  }
+
+  /// 处理 Push 事件（状态变化、错误等）。
+  void _onEvent(EasyTierEvent event) {
+    if (event is ConnectionStateChanged) {
+      debugPrint('连接状态: ${event.previous} → ${event.current}');
+      if (mounted) setState(() {});
+    } else if (event is ErrorOccurred) {
+      if (mounted) setState(() {});
+    } else if (event is TrafficUpdated) {
+      debugPrint('TrafficUpdated ↓${event.totalRxBytes} ↑${event.totalTxBytes}');
     }
   }
 
-  String _initialToml() {
-    return '''
-instance_name = "frb-example"
-hostname = "frb-example"
-listeners = ["tcp://0.0.0.0:11010"]
-
-[network_identity]
-network_name = "demo"
-network_secret = "demo"
-''';
+  Future<void> _connect() async {
+    final result = await _easyTier.startFromToml(_tomlController.text.trim());
+    if (!mounted) return;
+    setState(() {});
+    if (!result.ok) {
+      _showSnack(result.error ?? '启动失败', isError: true);
+    }
   }
 
-  void _syncInputFieldsFromConfig() {
-    final config = _controller.configById(_config.id) ?? _config;
-    _accountController.text = config.networkName;
-    _passwordController.text = config.networkSecret;
-    _seedNodeController.text =
-        config.peerUrls.isNotEmpty ? config.peerUrls.first : '';
-    _virtualIpController.text = config.virtualIpv4;
-  }
-
-  Future<String?> _applyNetworkSettings() async {
-    final account = _accountController.text.trim();
-    final password = _passwordController.text.trim();
-    var seedNode = _seedNodeController.text.trim();
-    final virtualIp = _virtualIpController.text.trim();
-    if (account.isEmpty || password.isEmpty) {
-      return '账号和密码不能为空';
-    }
-    if (seedNode.isNotEmpty && !seedNode.contains('://')) {
-      seedNode = 'tcp://$seedNode';
-      _seedNodeController.text = seedNode;
-    }
-
-    final current = _controller.configById(_config.id) ?? _config;
-    final data = current.tomlMap;
-    data['instance_name'] = account;
-    final identity = Map<String, dynamic>.from(
-      data['network_identity'] as Map? ?? <String, dynamic>{},
-    );
-    identity['network_name'] = account;
-    identity['network_secret'] = password;
-    data['network_identity'] = identity;
-    if (seedNode.isEmpty) {
-      data.remove('peer');
-    } else {
-      data['peer'] = [
-        <String, dynamic>{'uri': seedNode},
-      ];
-    }
-    if (virtualIp.isEmpty) {
-      data.remove('ipv4');
-      data['dhcp'] = true;
-    } else {
-      data['ipv4'] = virtualIp.contains('/') ? virtualIp : '$virtualIp/24';
-      data['dhcp'] = false;
-    }
-
-    _controller.updateConfig(
-      current.copyWith(configName: account, tomlData: data),
-    );
-    return null;
+  Future<void> _disconnect() async {
+    await _easyTier.stop();
+    if (mounted) setState(() {});
   }
 
   Future<void> _refresh() async {
-    await _controller.refreshStatus();
+    await _easyTier.refreshSnapshot();
     if (!mounted) return;
-    _showMessage('状态已刷新');
+    _showSnack('快照已刷新');
   }
 
-  Future<void> _toggle() async {
-    final applyError = await _applyNetworkSettings();
-    if (applyError != null) {
-      _showMessage(applyError, isError: true);
-      return;
+  /// 单条对端：路由 + 隧道 + 累计流量文案。
+  Widget _buildPeerTrafficLine(PeerTrafficInfo item) {
+    final route = item.route;
+    final conn = item.primaryConn;
+
+    final routePart = route == null
+        ? '#${item.peerId}'
+        : '#${route.peerId} ${route.hostname} ${route.ipv4Addr} '
+            'cost=${route.cost} ${route.latencyMs.toStringAsFixed(1)}ms'
+            '${route.isDirect ? " 直连" : " 经 ${route.nextHopPeerId}"}';
+
+    if (conn == null && item.conns.isEmpty) {
+      return Text('$routePart\n  隧道: （暂无） 流量: ↓0 ↑0');
     }
 
-    final running = _controller.isRunning(_config.id);
-    if (running) {
-      await _controller.stopInstance(_config.id);
-      if (!mounted) return;
-      _showMessage('已停止');
-      return;
-    }
+    final tunnel = conn?.tunnelLabel ?? item.conns.first.tunnelLabel;
+    final closed = conn?.isClosed == true;
+    final multi = item.conns.length > 1 ? '（${item.conns.length} 条隧道）' : '';
 
-    final launchConfig = _controller.configById(_config.id) ?? _config;
-    _controller.addLog('启动前 TOML:\n${launchConfig.toToml()}');
-
-    final error = await _controller.startInstance(_config.id);
-    if (!mounted) return;
-    if (error == null) {
-      _showMessage('已启动');
-    } else {
-      _showMessage(error, isError: true);
-    }
+    return Text(
+      '$routePart\n'
+      '  隧道: $tunnel '
+      '↓${_formatBytes(item.rxBytes)} ↑${_formatBytes(item.txBytes)}'
+      '${closed ? " [已关闭]" : ""}$multi',
+    );
   }
 
-  void _showMessage(String message, {bool isError = false}) {
-    _scaffoldMessengerKey.currentState
-      ?..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: isError ? Colors.red : null,
-        ),
-      );
-  }
-
+  /// 将字节数格式化为 B / KB / MB。
   String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    final kb = bytes / 1024;
-    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
-    final mb = kb / 1024;
-    if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
-    return '${(mb / 1024).toStringAsFixed(1)} GB';
+    if (bytes < 1024) return '${bytes}B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
   }
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    _accountController.dispose();
-    _passwordController.dispose();
-    _seedNodeController.dispose();
-    _virtualIpController.dispose();
-    super.dispose();
+  /// 顶部用户可见错误区（[EasyTier.lastError] / 初始化失败 / failed 状态）。
+  Widget? _buildErrorBanner() {
+    final parts = <String>[];
+    if (_initError != null) {
+      parts.add('初始化: $_initError');
+    }
+    final last = _easyTier.lastError;
+    if (last != null && last.isNotEmpty) {
+      parts.add(last);
+    }
+    if (_easyTier.connectionState == ConnectionState.failed &&
+        (last == null || last.isEmpty)) {
+      parts.add('连接失败（无详细原因）');
+    }
+    if (parts.isEmpty) return null;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50,
+        border: Border.all(color: Colors.red.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline, color: Colors.red.shade800, size: 22),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              parts.join('\n'),
+              style: TextStyle(color: Colors.red.shade900),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSnack(String message, {bool isError = false}) {
+    _scaffoldMessengerKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red.shade700 : null,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'EasyTier FRB Example',
       scaffoldMessengerKey: _scaffoldMessengerKey,
-      home: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, _) {
-          final config = _controller.configById(_config.id) ?? _config;
-          final instance = _controller.instanceFor(config.id);
-          final appLogs = _controller.appLogs.take(12).toList(growable: false);
+      title: 'EasyTier FRB Example',
+      theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
+      home: _initializing ? _buildLoading() : _buildHome(),
+    );
+  }
 
-          final routeByPeerId = <int, PeerRouteInfo>{};
-          for (final route in instance?.routes ?? const <PeerRouteInfo>[]) {
-            if (route.peerId > 0) {
-              routeByPeerId[route.peerId] = route;
-            }
-          }
-          final connByPeerId = <int, List<PeerConnInfo>>{};
-          for (final conn in instance?.peerConns ?? const <PeerConnInfo>[]) {
-            if (conn.peerId <= 0) continue;
-            connByPeerId.putIfAbsent(conn.peerId, () => []).add(conn);
-          }
-          final peerIds = <int>{...routeByPeerId.keys, ...connByPeerId.keys}
-              .toList()
-            ..sort();
+  Widget _buildLoading() {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            if (_initError != null) ...[
+              const SizedBox(height: 16),
+              Text(_initError!, style: const TextStyle(color: Colors.red)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 
-          final running = instance?.running == true;
-          final nodeIpv4Cidr = instance?.nodeInfo?.virtualIpv4Cidr ?? '';
-          final nodeIpv4 = nodeIpv4Cidr.isNotEmpty
-              ? nodeIpv4Cidr
-              : (instance?.virtualIpv4 ?? '');
+  Widget _buildHome() {
+    final inst = _easyTier.activeInstance;
+    final state = _easyTier.connectionState;
+    final totalRx = inst?.totalRxBytes ?? 0;
+    final totalTx = inst?.totalTxBytes ?? 0;
+    final errorBanner = _buildErrorBanner();
 
-          return Scaffold(
-            appBar: AppBar(
-              title: const Text('EasyTier FRB 组网示例'),
-              actions: [
-                IconButton(
-                  onPressed: _initializing ? null : _refresh,
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('EasyTier FRB'),
+        actions: [
+          IconButton(
+            tooltip: '刷新快照',
+            onPressed: _refresh,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          ?errorBanner,
+          Text('核心版本: ${_easyTier.coreVersion ?? "-"}'),
+          Text('连接状态: $state'),
+          Text(
+            '虚拟 IP: ${_easyTier.virtualIpv4.isEmpty ? "(未分配)" : _easyTier.virtualIpv4}',
+          ),
+          Text('组网活动: ${_easyTier.hasNetworkActivity ? "是" : "否"}'),
+          Text('节点数: ${_easyTier.peerCount}'),
+          Text('总流量: ↓${_formatBytes(totalRx)} ↑${_formatBytes(totalTx)}'),
+          if (inst?.errorMessage != null)
+            Text(
+              '警告: ${inst!.errorMessage}',
+              style: TextStyle(color: Colors.orange.shade800),
             ),
-            body: _initializing
-                ? const Center(child: CircularProgressIndicator())
-                : _initError != null
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: SelectableText(
-                            '初始化失败：\n$_initError\n\n'
-                            '若提示找不到 librust_lib_easytier_frb.so，请执行 '
-                            'flutter clean 后重新 flutter run。',
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      )
-                    : SingleChildScrollView(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Runtime',
-                                  style:
-                                      Theme.of(context).textTheme.titleMedium,
-                                ),
-                                const SizedBox(height: 12),
-                                SelectableText(
-                                  'Core version: ${_controller.coreVersion ?? 'unknown'}\n'
-                                  'Backend: in-process FRB (no easytier-core.exe)\n'
-                                  'Running: ${running ? 'yes' : 'no'}\n'
-                                  'Peers: ${instance?.peerCount ?? 0}\n'
-                                  'Routes: ${instance?.routes.length ?? 0}\n'
-                                  'Virtual IPv4: $nodeIpv4\n'
-                                  'Error: ${instance?.errorMessage ?? 'none'}',
-                                ),
-                                const SizedBox(height: 12),
-                                SelectableText(
-                                  _controller.platformRequirements,
-                                  style:
-                                      Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '组网设置',
-                                  style:
-                                      Theme.of(context).textTheme.titleMedium,
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  '账号 → network_name，密码 → network_secret；'
-                                  '初始节点为首个 peer URL。Android 自动 no_tun + 系统 VPN。',
-                                ),
-                                const SizedBox(height: 12),
-                                TextField(
-                                  controller: _accountController,
-                                  decoration: const InputDecoration(
-                                    labelText: '账号（network_name）',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                TextField(
-                                  controller: _passwordController,
-                                  obscureText: true,
-                                  decoration: const InputDecoration(
-                                    labelText: '密码（network_secret）',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                TextField(
-                                  controller: _seedNodeController,
-                                  decoration: const InputDecoration(
-                                    labelText:
-                                        '初始节点（如 tcp://1.2.3.4:11010）',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                TextField(
-                                  controller: _virtualIpController,
-                                  decoration: const InputDecoration(
-                                    labelText:
-                                        '虚拟 IP（留空则 DHCP，如 10.144.144.10/24）',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Wrap(
-                                  spacing: 12,
-                                  runSpacing: 12,
-                                  children: [
-                                    FilledButton.icon(
-                                      onPressed: () async {
-                                        final error =
-                                            await _applyNetworkSettings();
-                                        if (!mounted) return;
-                                        if (error == null) {
-                                          _showMessage('组网配置已保存');
-                                        } else {
-                                          _showMessage(error, isError: true);
-                                        }
-                                      },
-                                      icon: const Icon(Icons.save),
-                                      label: const Text('保存组网配置'),
-                                    ),
-                                    FilledButton.icon(
-                                      onPressed: _toggle,
-                                      icon: Icon(
-                                        running ? Icons.stop : Icons.play_arrow,
-                                      ),
-                                      label: Text(running ? '停止' : '启动'),
-                                    ),
-                                    OutlinedButton.icon(
-                                      onPressed: _refresh,
-                                      icon: const Icon(Icons.sync),
-                                      label: const Text('刷新状态'),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '当前节点',
-                                  style:
-                                      Theme.of(context).textTheme.titleMedium,
-                                ),
-                                const SizedBox(height: 12),
-                                SelectableText(
-                                  'Display: ${config.displayName}\n'
-                                  'Instance: ${config.instanceName}\n'
-                                  'Hostname: ${instance?.nodeInfo?.hostname ?? config.hostname}\n'
-                                  'Version: ${instance?.nodeInfo?.version ?? ''}\n'
-                                  'Dev: ${instance?.nodeInfo?.devName ?? ''}\n'
-                                  'TX/RX: ${_formatBytes(instance?.totalTxBytes ?? 0)} / '
-                                  '${_formatBytes(instance?.totalRxBytes ?? 0)}',
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '组网设备',
-                                  style:
-                                      Theme.of(context).textTheme.titleMedium,
-                                ),
-                                const SizedBox(height: 12),
-                                if (peerIds.isEmpty)
-                                  const Text('暂无设备，请先启动并等待发现。')
-                                else
-                                  ...peerIds.map((peerId) {
-                                    final route = routeByPeerId[peerId];
-                                    final conns = connByPeerId[peerId] ??
-                                        const <PeerConnInfo>[];
-                                    final rx = conns.fold<int>(
-                                      0,
-                                      (s, c) => s + c.rxBytes,
-                                    );
-                                    final tx = conns.fold<int>(
-                                      0,
-                                      (s, c) => s + c.txBytes,
-                                    );
-                                    final tunnels = conns
-                                        .map((c) => c.tunnelLabel)
-                                        .toSet()
-                                        .join('/');
-                                    return ListTile(
-                                      contentPadding: EdgeInsets.zero,
-                                      title: Text(
-                                        () {
-                                          final name = route?.hostname ?? '';
-                                          return name.isNotEmpty
-                                              ? name
-                                              : 'peer $peerId';
-                                        }(),
-                                      ),
-                                      subtitle: Text(
-                                        'peer=$peerId  ipv4=${route?.ipv4Cidr ?? '-'}\n'
-                                        'cost=${route?.cost ?? '-'}  '
-                                        'latency=${route?.latencyMs.toStringAsFixed(1) ?? '-'}ms\n'
-                                        'tunnel=${tunnels.isEmpty ? '-' : tunnels}',
-                                      ),
-                                      trailing: Text(
-                                        'TX ${_formatBytes(tx)}\nRX ${_formatBytes(rx)}',
-                                        textAlign: TextAlign.right,
-                                      ),
-                                    );
-                                  }),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '运行信息 JSON',
-                                  style:
-                                      Theme.of(context).textTheme.titleMedium,
-                                ),
-                                const SizedBox(height: 8),
-                                SelectableText(
-                                  () {
-                                    final json =
-                                        instance?.lastRunningInfoJson ?? '';
-                                    return json.isEmpty ? '（未启动）' : json;
-                                  }(),
-                                  style:
-                                      Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '日志',
-                                  style:
-                                      Theme.of(context).textTheme.titleMedium,
-                                ),
-                                const SizedBox(height: 12),
-                                SelectableText(
-                                  appLogs.isEmpty
-                                      ? '暂无日志'
-                                      : appLogs.reversed.join('\n'),
-                                  style:
-                                      Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-          );
-        },
+          const SizedBox(height: 12),
+          const Text('TOML', style: TextStyle(fontWeight: FontWeight.bold)),
+          TextField(
+            controller: _tomlController,
+            maxLines: 10,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              FilledButton(
+                onPressed: _easyTier.canConnect ? _connect : null,
+                child: const Text('连接'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: _easyTier.canDisconnect ? _disconnect : null,
+                child: const Text('断开'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  '对端节点（路由+流量）',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              const Text('节点'),
+              Switch(
+                value: _peersAutoRefresh,
+                onChanged: (value) {
+                  setState(() {
+                    _peersAutoRefresh = value;
+                    _easyTier.peersAutoRefreshEnabled = value;
+                  });
+                },
+              ),
+              const Text('流量'),
+              Switch(
+                value: _trafficAutoRefresh,
+                onChanged: (value) {
+                  setState(() {
+                    _trafficAutoRefresh = value;
+                    _easyTier.peerTrafficAutoRefreshEnabled = value;
+                  });
+                },
+              ),
+            ],
+          ),
+          Text(
+            '流量约每 1s 推送；试 ping 对端虚拟 IP 观察 ↓↑ 变化。',
+            style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+          ),
+          StreamBuilder<List<PeerTrafficInfo>>(
+            stream: _easyTier.peerTrafficStream,
+            initialData: _easyTier.peerTraffic,
+            builder: (context, snapshot) {
+              final list = snapshot.data ?? const [];
+              if (list.isEmpty) {
+                return const Text('（暂无）');
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: list.map(_buildPeerTrafficLine).toList(),
+              );
+            },
+          ),
+        ],
       ),
     );
   }
