@@ -1,68 +1,39 @@
-import 'package:easytier_frb/easytier_frb.dart';
 import 'package:easytier_frb_example/main.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-class _MockApi implements RustLibApi {
-  @override
-  Future<void> crateApiEasytierInitApp() async {}
-
-  @override
-  Future<String> crateApiEasytierEasytierVersion() async => '2.6.4';
-
-  @override
-  Future<void> crateApiEasytierParseConfig({required String toml}) async {}
-
-  @override
-  Future<String> crateApiEasytierRunNetworkFromToml({required String toml}) async =>
-      '11111111-1111-1111-1111-111111111111';
-
-  @override
-  Future<void> crateApiEasytierStopInstance({required String instanceId}) async {}
-
-  @override
-  Future<void> crateApiEasytierStopAllInstances() async {}
-
-  @override
-  Future<void> crateApiEasytierSetTunFd({
-    required String instanceId,
-    required int fd,
-  }) async {}
-
-  @override
-  Future<String> crateApiEasytierGetRunningInfoJson({
-    required String instanceId,
-  }) async =>
-      '{"dev_name":"et0","my_node_info":{"hostname":"test","version":"2.0",'
-      '"virtual_ipv4":{"address":{"addr":168430599},"network_length":24}},'
-      '"routes":[],"peer_route_pairs":[]}';
-
-  @override
-  Future<bool> crateApiEasytierIsInstanceRunning({
-    required String instanceId,
-  }) async =>
-      true;
-
-  @override
-  Stream<String> crateApiEasytierWatchSession({
-    required String instanceId,
-  }) =>
-      Stream<String>.value(
-        '{"type":"snapshot","json":"{\\"dev_name\\":\\"et0\\",'
-        '\\"my_node_info\\":{\\"hostname\\":\\"test\\",\\"version\\":\\"2.0\\",'
-        '\\"virtual_ipv4\\":{\\"address\\":{\\"addr\\":168430599},'
-        '\\"network_length\\":24}},\\"routes\\":[],\\"peer_route_pairs\\":[]}"}',
-      );
-}
-
 void main() {
-  setUpAll(() {
-    TestWidgetsFlutterBinding.ensureInitialized();
-    RustLib.initMock(api: _MockApi());
+  testWidgets('显示核心版本和主要操作', (tester) async {
+    await tester.pumpWidget(const EasyTierDemoApp());
+
+    expect(find.text('核心版本：不可用'), findsOneWidget);
+    expect(find.text('TOML 配置'), findsOneWidget);
+    expect(find.byKey(const Key('toml-editor')), findsOneWidget);
+    expect(find.byKey(const Key('validate-button')), findsOneWidget);
+    expect(find.byKey(const Key('start-button')), findsOneWidget);
+    expect(find.text('当前连接节点'), findsOneWidget);
   });
 
-  testWidgets('example app builds', (WidgetTester tester) async {
-    await tester.pumpWidget(const ExampleApp());
-    await tester.pump();
-    expect(find.textContaining('EasyTier FRB'), findsWidgets);
+  testWidgets('允许编辑 TOML', (tester) async {
+    await tester.pumpWidget(const EasyTierDemoApp());
+
+    const replacement = 'instance_name = "edited"';
+    await tester.enterText(find.byKey(const Key('toml-editor')), replacement);
+
+    final editor = tester.widget<TextField>(
+      find.byKey(const Key('toml-editor')),
+    );
+    expect(editor.controller?.text, replacement);
+  });
+
+  testWidgets('显示核心初始化错误', (tester) async {
+    await tester.pumpWidget(
+      const EasyTierDemoApp(initializationError: 'native library missing'),
+    );
+
+    expect(
+      find.textContaining('核心初始化失败：native library missing'),
+      findsOneWidget,
+    );
   });
 }

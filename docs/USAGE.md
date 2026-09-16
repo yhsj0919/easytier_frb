@@ -168,13 +168,14 @@ uri = "tcp://relay.example.com:11010"
 | 未写 `hostname` | Android 用设备名；桌面用 `Platform.localHostname` |
 | 桌面未写 `listeners` | 注入 `tcp://0.0.0.0:11010` |
 | Android 启动 | 设置 `flags.no_tun = true`，TUN 由系统 VPN 提供 |
+| 未写 ipv4 | 自动启用 EasyTier DHCP |
 | 未传 `configId` | 使用 TOML `instance_id`，否则生成 UUID |
 
 ### 常用可选字段
 
 ```toml
 instance_id = "stable-config-id"   # 业务配置 ID（Map key）
-ipv4 = "10.126.126.2/24"           # 静态虚拟 IP；Android 无 DHCP 时建议填写
+ipv4 = "10.126.126.2/24"           # 可选：需要固定地址时才填写
 manual_routes = ["192.168.1.0/24"] # Android VPN 路由
 proxy_cidrs = ["0.0.0.0/0"]        # 可并入 Android VPN 路由
 mtu = 1300
@@ -497,3 +498,4 @@ flutter run -d windows   # 或 android / linux / macos
 ```
 
 示例包含：TOML 编辑、连接/断开、错误横幅、`peerTrafficStream` 与自动刷新开关。
+

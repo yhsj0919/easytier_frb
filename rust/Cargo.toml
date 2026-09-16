@@ -8,13 +8,12 @@ build = "build.rs"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-flutter_rust_bridge = "=2.12.0"
-lazy_static = "1.4"
+flutter_rust_bridge = "=2.13.0"
+lazy_static = "1.5"
 serde_json = "1.0"
-tokio = { version = "1.39", features = ["rt-multi-thread", "sync", "macros"] }
-uuid = { version = "1.0", features = ["v4"] }
-
-# 与 astral 相同：从 GitHub 拉取 EasyTier 源码（无本地路径）
+toml = "0.8.12"
+tokio = { version = "1.48", features = ["rt-multi-thread", "sync", "macros"] }
+uuid = { version = "1.18", features = ["v4"] }
 easytier = { git = "https://github.com/EasyTier/EasyTier.git", rev = "8428a89d2dabc94c97d370ec607c6ca142473626", default-features = false, features = [
     "wireguard",
     "websocket",
@@ -29,15 +28,10 @@ easytier = { git = "https://github.com/EasyTier/EasyTier.git", rev = "8428a89d2d
 ] }
 
 [build-dependencies]
-cargo_metadata = "0.18"
+cargo_metadata = "0.23"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
 
-# Android/iOS/desktop release：偏向缩小 .so / dylib 体积（LTO 会明显拉长编译时间）
-#[profile.release]
-#opt-level = "z"
-#lto = true
-#codegen-units = 1
-#panic = "abort"
-#strip = true
+
+

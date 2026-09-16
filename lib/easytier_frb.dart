@@ -1,15 +1,13 @@
-/// EasyTier Flutter 插件公共导出。
+/// 在 Flutter 应用中启动和管理 EasyTier 网络。
 ///
-/// 宿主应用通常只需 `import 'package:easytier_frb/easytier_frb.dart';`，
-/// 使用 [EasyTier] 作为唯一入口。若需单独初始化 FRB，可引用 [RustLib]。
+/// 新手请从 [EasyTier.initialize] 和 [EasyTier.startToml] 开始。
 library;
 
-export 'src/easytier.dart';
-export 'src/easytier_event.dart';
-export 'src/models/connection_state.dart';
-export 'src/models/network_instance.dart';
-export 'src/models/peer_traffic_info.dart';
-export 'src/models/start_result.dart';
-
-// FRB 初始化（宿主若需单独 init 可引用）
-export 'src/bridge/frb_generated.dart';
+export 'src/config/easytier_config.dart';
+export 'src/core/easytier.dart';
+export 'src/models/easytier_event.dart';
+export 'src/models/easytier_exception.dart';
+export 'src/models/easytier_network_info.dart';
+export 'src/models/easytier_session_snapshot.dart';
+export 'src/models/easytier_session_state.dart';
+export 'src/session/easytier_session.dart';

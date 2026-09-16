@@ -1,178 +1,129 @@
 # easytier_frb
 
-Flutter 插件：在 **Flutter 进程内** 运行 EasyTier 核心（`flutter_rust_bridge` 2.12 + cargokit），**不** 启动 `easytier-core` 子进程。
+通过 `flutter_rust_bridge` 将 EasyTier 核心嵌入 Flutter 应用。
 
-宿主应用只需使用一个入口类：**[`EasyTier`](lib/src/easytier.dart)**。
+插件只提供一个简洁入口：使用类型化 `EasyTierConfig` 配置网络，启动时自动生成 TOML 并交给内嵌核心。原始 TOML 只作为高级配置入口。EasyTier CLI 不作为主要入口。
 
-## 特性
+## 当前状态
 
-- **TOML 启动**：`startFromToml`，插件自动补全 `hostname`、`listeners`、Android `no_tun` 等
-- **Pull**：`connectionState`、`peers`、`peerTraffic`、`lastError` 等 getter + `listenable`
-- **Push**：`events`（连接/对端/错误）、`peersStream`、`peerTrafficStream`（约 1s 流量刷新）
-- **单活跃会话**：同时只维护一个组网实例
+- EasyTier 核心：`v2.6.4`，固定到提交 `8428a89d2dabc94c97d370ec607c6ca142473626`。
+- 桥接层：`flutter_rust_bridge 2.13.0`。
+- 日常配置使用类型化 `EasyTierConfig`；支持生成 TOML，并保留原始 TOML 和文件高级入口。
+- 支持在同一进程中并行运行多个 EasyTier 会话。
+- 支持监听会话生命周期、运行快照、核心事件、路由、连接和流量统计。
+- 仅支持原生平台，不支持 Web。
+- Windows 原生集成已经验证。Android 已完成真机启动、后台连接保持、页面恢复和防重复启动验证；iOS、macOS、Linux 和 OpenHarmony 仍需在对应设备或主机上验证。
 
-## 平台与架构
-
-| 平台 | EasyTier 运行位置 | TUN / 虚拟网卡 |
-|------|-------------------|----------------|
-| Android | Flutter 进程内（FRB） | 系统 `VpnService` → `set_tun_fd` |
-| Windows / Linux / macOS | Flutter 进程内（FRB） | 库内 TUN（Windows 需 `wintun.dll` + 通常需管理员） |
-
-```
-┌─────────────┐     Pull getter / listenable
-│  宿主 UI    │◄────────────────────────────┐
-└──────┬──────┘                             │
-       │ startFromToml / stop                │ SnapshotStore
-       ▼                                     │
-┌─────────────┐     events / streams         │
-│   EasyTier  │────────────────────────────►│ Push
-└──────┬──────┘                             │
-       │ FRB                                │
-       ▼                                     │
-┌─────────────┐     watch_session JSON      │
-│ Rust 核心   │─────────────────────────────┘
-└─────────────┘
-```
-
-## 快速开始
-
-### 1. 添加依赖
-
-```yaml
-dependencies:
-  easytier_frb:
-    path: ../easytier_frb   # 或你的 git / pub 源
-```
-
-### 2. 初始化并连接
+## 使用方法
 
 ```dart
 import 'package:easytier_frb/easytier_frb.dart';
-import 'package:flutter/material.dart' hide ConnectionState;
 
-final easyTier = EasyTier();
+const config = EasyTierConfig(
+  networkName: 'example',
+  networkSecret: 'replace-me',
+  instanceName: 'my-network',
+  hostname: 'flutter-node',
+  listeners: ['tcp://0.0.0.0:11010'],
+  peers: [EasyTierPeer('tcp://server.example.com:11010')],
+  flags: EasyTierFlags(enableUdpBroadcastRelay: true),
+);
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await easyTier.initialize();
+Future<void> startEasyTier() async {
+  final easyTier = await EasyTier.initialize();
+  final session = await easyTier.start(config);
 
-  const toml = '''
-instance_name = "my-app"
-hostname = "my-pc"
-listeners = ["tcp://0.0.0.0:11010"]
+  session.states.listen((state) {
+    print('EasyTier 状态：${state.status}');
+  });
 
-[network_identity]
-network_name = "my-net"
-network_secret = "my-secret"
-
-[[peer]]
-uri = "tcp://peer.example.com:11010"
-''';
-
-  final result = await easyTier.startFromToml(toml);
-  if (!result.ok) {
-    print('启动失败: ${result.error}');
-    print('lastError: ${easyTier.lastError}');
-    return;
-  }
-
-  print('状态: ${easyTier.connectionState}');
-  print('本机 IP: ${easyTier.virtualIpv4}');
+  session.snapshots.listen((snapshot) {
+    print('IPv4：${snapshot.virtualIpv4}');
+    print('在线节点数：${snapshot.onlineNodeCount}');
+  });
 }
 ```
 
-### 3. 监听状态（二选一或组合）
+`EasyTierConfig.toToml()` 可以把页面表单生成的配置保存或展示：
 
 ```dart
-// Pull：绑定 UI
-easyTier.listenable.addListener(() {
-  // 刷新按钮、状态文案等
-});
-
-// Push：语义化事件
-easyTier.events.listen((event) {
-  switch (event) {
-    case ConnectionStateChanged(:final current):
-      print('连接状态 → $current');
-    case ErrorOccurred(:final message):
-      print('错误: $message');
-    case TrafficUpdated(:final totalRxBytes, :final totalTxBytes):
-      print('总流量 ↓$totalRxBytes ↑$totalTxBytes');
-    default:
-      break;
-  }
-});
-
-// Push：对端列表 / 各 peer 流量（新订阅会立即收到当前快照）
-easyTier.peersStream.listen((peers) => print('节点数 ${peers.length}'));
-easyTier.peerTrafficStream.listen((list) {
-  for (final item in list) {
-    print('#${item.peerId} ↓${item.rxBytes} ↑${item.txBytes}');
-  }
-});
+final toml = config.toToml();
 ```
 
-### 4. 断开
+实体类尚未覆盖某个 EasyTier 上游字段时，再使用原始 TOML 高级入口：
 
 ```dart
-await easyTier.stop();      // 停止当前活跃实例
-// await easyTier.stopAll(); // 停止全部并清空快照
+final advanced = EasyTierConfig.fromToml(rawToml);
+final session = await easyTier.start(advanced);
 ```
 
-更完整的 API 说明、TOML 约定、错误处理与平台注意事项见 **[docs/USAGE.md](docs/USAGE.md)**。
+已有 TOML 文件可以直接启动：
 
-## 文档
+```dart
+final session = await easyTier.startFile('/path/to/easytier.toml');
+```
 
-| 文档 | 说明 |
-|------|------|
-| [docs/USAGE.md](docs/USAGE.md) | **使用指南**（集成、Pull/Push、状态机、示例） |
-| [docs/BUILD.md](docs/BUILD.md) | **构建环境**（工具链、系统库、各平台依赖） |
-| [example/lib/main.dart](example/lib/main.dart) | 可运行的示例 App |
+只校验配置而不启动网络：
 
-## 构建环境（摘要）
+```dart
+await easyTier.validate(config);
+```
 
-从源码编译插件需要 **Flutter**、**Rust (stable)**、**Git** 及对应平台原生工具链；首次构建会从 GitHub 拉取 `easytier` git 依赖，耗时与磁盘占用较大。
+## 会话数据
 
-| 平台 | 主要额外依赖 |
-|------|----------------|
-| **通用** | Flutter ≥ 3.3（Dart ≥ 3.12）、rustup stable、Git、可访问 GitHub；**LLVM/libclang** 在 Android 交叉编译与部分 bindgen 步骤会用到（见 [BUILD.md](docs/BUILD.md)） |
-| **Android** | Android SDK、NDK、JDK 17、CMake |
-| **Windows** | Visual Studio 2022（「使用 C++ 的桌面开发」）、CMake；运行时附带 `wintun.dll`、`Packet.dll` |
-| **Linux** | `build-essential` / clang、cmake、ninja、`libssl-dev`、`pkg-config` |
-| **macOS / iOS** | Xcode；iOS 另需 CocoaPods |
+`EasyTierSession.snapshot` 保存最新的不可变运行快照，提供以下类型化字段：
 
-可选（仅修改 `rust/src/api` 时）：`cargo install flutter_rust_bridge_codegen --version 2.12.0`
+- `localNode`
+- `routes`
+- `connections`
+- `peerTraffic`
+- `connectedPeers`：合并路由、活动连接和流量后的当前连接节点
+- `totalReceivedBytes` 和 `totalTransmittedBytes`
+- `errorMessage`
 
-完整说明、安装命令与排错见 **[docs/BUILD.md](docs/BUILD.md)**。
+`rawJson` 作为向前兼容的兜底入口保留。当 EasyTier 新版本增加了插件尚未建模的字段时，可以直接读取原始数据。
 
-## 开发与构建
+## Android 返回键与页面恢复
 
-```bash
-# 检查环境
-flutter doctor -v
-rustc --version
+Android 返回键可能销毁 Flutter Activity，但系统 VPN、同一进程中的 Rust 核心实例仍会继续运行。再次打开应用时，`EasyTier.initialize()` 会自动发现并接管这些实例，重新建立快照与事件监听；不要因为页面进入 `paused`、`inactive` 或 `detached` 就调用 `stop()`。
 
-# 依赖
-flutter pub get
-cd example && flutter pub get
+```dart
+final easyTier = await EasyTier.initialize();
+final session = easyTier.sessions.firstOrNull;
+```
 
-# 静态分析
+不使用 `package:collection` 时可以写成：
+
+```dart
+final session = easyTier.sessions.isEmpty ? null : easyTier.sessions.first;
+```
+
+只有用户明确点击“断开”时才调用 `session.stop()` 或 `easyTier.stopAll()`。如果 Android 进程被强制结束或被系统彻底回收，Rust 内存状态也会消失；应用需要持久化 TOML，并在下次启动时重新调用 `startToml`。插件不会让系统重启一个已经失去 Rust 核心的孤立 VPN Service。
+## 错误与资源归属
+
+公开操作会抛出 `EasyTierException`，并携带稳定的 `EasyTierErrorCode`。每个会话只控制其自身 `start` 调用返回的核心实例。`stopAll` 会停止同一个 `EasyTier` 管理器拥有的全部会话。
+
+如果其他 EasyTier 进程已经占用了所需的 TUN 设备、端口或其他系统资源，插件会返回 `resourceConflict`，并保留原生错误详情。该判断同时覆盖启动调用直接失败，以及核心实例创建后通过运行快照上报错误的情况。
+
+## 平台状态
+
+| 平台 | 工程与构建接入 | 运行验证 |
+| --- | --- | --- |
+| Windows | 已完成 | 已完成：管理员模式、TUN、DHCP、与官方客户端双向通信 |
+| Android | 已完成 | 已完成：连接、后台保持、页面恢复、防重复启动 |
+| iOS | 已完成 | 待 Apple 主机和设备验证 |
+| macOS | 已完成 | 待 Apple 主机验证 |
+| Linux | 已完成 | 待 Linux 主机验证 |
+| OpenHarmony | 已创建工程骨架 | 待接入 OHOS 工具链 |
+| Web | 未接入 | 不支持 |
+
+完整的新手 API 指南见 [docs/API.md](docs/API.md)。原生构建说明见 [docs/BUILD.md](docs/BUILD.md)，范围和设计决策见 [docs/REBUILD_PLAN.md](docs/REBUILD_PLAN.md)。
+
+## 开发检查
+
+```sh
 flutter analyze
-
-# 重新生成 FRB 绑定（修改 rust/src/api 后，需先安装 codegen，见 docs/BUILD.md）
-flutter_rust_bridge_codegen generate
-
-# 构建示例
-cd example && flutter build windows --debug
-cd example && flutter build apk --debug
+flutter test
+cd rust
+cargo check
 ```
-
-## 依赖说明
-
-- Rust 侧 `easytier` 版本见 [`rust/Cargo.toml`](rust/Cargo.toml)（`git` 依赖，需网络克隆）。
-- Windows 运行时需 `wintun.dll`、`Packet.dll`：由 `rust/build.rs` 从 EasyTier 仓库 `third_party` 拷贝至 `rust_builder/prebuilt/windows`，再随应用打包。
-- **不需要**单独安装 `easytier-core` 可执行文件。
-
-## 许可
-
-与仓库根目录许可一致（若未单独声明，以项目实际情况为准）。

@@ -244,8 +244,8 @@ flutter build ios --debug --no-codesign
 仅当修改 `rust/src/api/` 并需重新生成 Dart 绑定时安装：
 
 ```bash
-# 版本需与 pubspec / Cargo.toml 中 flutter_rust_bridge 一致（当前 2.12.0）
-cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+# 版本需与 pubspec / Cargo.toml 中 flutter_rust_bridge 一致（当前 2.13.0）
+cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
 ```
 
 在仓库根目录执行：
@@ -333,7 +333,7 @@ easytier_frb/
 | Android NDK 未安装 | Android Studio SDK Manager 安装 NDK，或按 `flutter doctor` 提示 |
 | `请先调用 EasyTier.initialize()` | 运行时问题：先 `initialize()` 再调组网 API |
 | 编译极慢 | 首次正常；可暂时用 `--debug`；Release 开 LTO 会更慢（见 `rust/Cargo.toml` 注释） |
-| `flutter_rust_bridge_codegen` 找不到 | `cargo install flutter_rust_bridge_codegen --version 2.12.0` |
+| `flutter_rust_bridge_codegen` 找不到 | `cargo install flutter_rust_bridge_codegen --version 2.13.0` |
 
 ---
 

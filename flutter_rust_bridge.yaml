@@ -1,4 +1,3 @@
 rust_input: crate::api
 rust_root: rust/
-dart_output: lib/src/bridge
-stop_on_error: true
+dart_output: lib/src/rust

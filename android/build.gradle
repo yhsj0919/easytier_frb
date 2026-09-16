@@ -32,3 +32,9 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile).configureEach
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
+
+apply from: "../cargokit/gradle/plugin.gradle"
+cargokit {
+    manifestDir = "../rust"
+    libname = "rust_lib_easytier_frb"
+}

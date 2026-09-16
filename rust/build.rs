@@ -1,5 +1,3 @@
-//! 从 Cargo 解析到的 easytier 依赖目录链接 third_party，并将运行时 DLL 拷到 rust_builder/prebuilt。
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -9,10 +7,14 @@ fn easytier_crate_root() -> Option<PathBuf> {
         .manifest_path(&manifest)
         .exec()
         .ok()?;
-    let pkg = metadata.packages.iter().find(|p| p.name == "easytier")?;
-    pkg.manifest_path
+    let package = metadata
+        .packages
+        .iter()
+        .find(|item| item.name == "easytier")?;
+    package
+        .manifest_path
         .parent()
-        .map(|p| PathBuf::from(p.as_std_path()))
+        .map(|path| PathBuf::from(path.as_std_path()))
 }
 
 #[cfg(target_os = "windows")]
@@ -30,17 +32,15 @@ fn third_party_lib_dir(easytier_root: &Path) -> PathBuf {
     }
 }
 
-/// 拷贝到插件内相对路径，供 CMake 打包（无绝对路径硬编码）。
 #[cfg(target_os = "windows")]
 fn copy_runtime_dlls(from_dir: &Path) -> std::io::Result<()> {
-    let out_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../rust_builder/prebuilt/windows");
+    let out_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../cargokit/prebuilt/windows");
     fs::create_dir_all(&out_dir)?;
     for name in ["Packet.dll", "wintun.dll"] {
-        let src = from_dir.join(name);
-        if src.is_file() {
-            fs::copy(&src, out_dir.join(name))?;
-            println!("cargo:rerun-if-changed={}", src.display());
+        let source = from_dir.join(name);
+        if source.is_file() {
+            fs::copy(&source, out_dir.join(name))?;
+            println!("cargo:rerun-if-changed={}", source.display());
         }
     }
     Ok(())
@@ -48,11 +48,14 @@ fn copy_runtime_dlls(from_dir: &Path) -> std::io::Result<()> {
 
 fn main() {
     let Some(root) = easytier_crate_root() else {
-        println!("cargo:warning=未在 cargo metadata 中找到 easytier 包");
+        println!("cargo:warning=EasyTier package was not found in Cargo metadata");
         return;
     };
 
-    println!("cargo:rerun-if-changed={}", root.join("third_party").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        root.join("third_party").display()
+    );
 
     #[cfg(all(windows, target_env = "msvc"))]
     {
@@ -60,13 +63,13 @@ fn main() {
         if lib_dir.join("Packet.lib").is_file() {
             let native = lib_dir.display().to_string().replace('\\', "/");
             println!("cargo:rustc-link-search=native={native}");
-            if let Err(e) = copy_runtime_dlls(&lib_dir) {
-                println!("cargo:warning=拷贝 third_party DLL 失败: {e}");
+            if let Err(error) = copy_runtime_dlls(&lib_dir) {
+                println!("cargo:warning=failed to copy EasyTier runtime DLLs: {error}");
             }
         } else {
             println!(
-                "cargo:warning=未找到 {}（请确认 git 依赖的 easytier 含 third_party）",
-                lib_dir.join("Packet.lib").display()
+                "cargo:warning=Packet.lib was not found at {}",
+                lib_dir.display()
             );
         }
     }

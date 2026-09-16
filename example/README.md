@@ -1,18 +1,27 @@
-# easytier_frb_example
+# EasyTier Flutter 真实 Demo
 
-仿 `easytier_flutter` 的组网演示：账号/密码/节点配置、启动/停止、状态与设备列表。
+这个示例直接启动内嵌 EasyTier 核心，并显示运行状态、虚拟 IP、已连接节点、流量和日志。默认 TOML 使用占位网络名、密钥和 peer，运行前请替换为自己的组网信息。
 
-## 运行
+## Windows 测试
 
-```bash
-flutter pub get
-flutter run
+```powershell
+cd example
+flutter run -d windows
 ```
 
-## Windows 构建说明
+建议以管理员身份启动终端，否则 Windows 可能无法创建或使用虚拟网卡。打开页面后点击“校验配置”，再点击“启动网络”。
 
-`runner.exe.manifest` 使用 `asInvoker`，避免在未提权环境下链接时出现 **LNK1327（mt.exe）**。
+## Android 测试
 
-启用 TUN 时请**以管理员身份**运行生成的 `easytier_frb_example.exe`（或从已提权的终端执行 `flutter run`），并确认 exe 同目录有 cargokit 打包的 `wintun.dll`、`Packet.dll`。
+```powershell
+cd example
+flutter run -d android
+```
 
-若必须在 manifest 中写 `requireAdministrator`，请仅在**已提权的 Visual Studio / 终端**中构建，且 manifest 内勿使用非 ASCII 注释（否则 mt.exe 可能失败）。
+也可以直接安装已经构建的 `build/app/outputs/flutter-apk/app-debug.apk`。首次点击“启动网络”时，系统会弹出 VPN 授权框；同意后 Demo 会自动继续，不需要再次点击。Android 当前限制为一个 VPN 会话。
+
+## 修改配置
+
+页面中央的编辑器就是实际传给核心的 TOML。两台设备要加入同一个网络，必须使用相同的 `network_name` 和 `network_secret`，并保证至少一个 `peer` 可以访问。示例中的值只是占位符，无法直接连接。
+
+原生集成测试位于 `integration_test/simple_test.dart`。

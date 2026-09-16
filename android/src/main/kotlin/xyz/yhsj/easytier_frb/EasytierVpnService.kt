@@ -36,7 +36,7 @@ class EasytierVpnService : VpnService() {
                 "configId" to (configId ?: ""),
             ),
         )
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onCreate() {
@@ -115,3 +115,5 @@ class EasytierVpnService : VpnService() {
             ?: throw IllegalStateException("Failed to establish VpnService")
     }
 }
+
+

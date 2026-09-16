@@ -1,0 +1,10 @@
+{
+  "module": {
+    "name": "rust_lib_easytier_frb",
+    "type": "har",
+    "deviceTypes": [
+      "default",
+      "tablet"
+    ]
+  }
+}
