@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/easytier_engine.dart';
 import '../core/easytier_error_classifier.dart';
+import '../models/easytier_connection_overview.dart';
 import '../models/easytier_event.dart';
 import '../models/easytier_exception.dart';
 import '../models/easytier_network_info.dart';
@@ -44,6 +45,8 @@ final class EasyTierSession {
       StreamController<EasyTierSessionSnapshot>.broadcast();
   final StreamController<EasyTierEvent> _eventController =
       StreamController<EasyTierEvent>.broadcast();
+  final StreamController<EasyTierConnectionOverview> _connectionInfoController =
+      StreamController<EasyTierConnectionOverview>.broadcast();
 
   late final StreamSubscription<EngineSessionMessage> _watchSubscription;
   Future<void>? _stopOperation;
@@ -54,6 +57,19 @@ final class EasyTierSession {
 
   /// 最近一次运行快照；核心尚未返回数据时为空值。
   EasyTierSessionSnapshot? get snapshot => _snapshot.value;
+
+  /// 本机状态和全部对等节点的当前缓存信息。
+  EasyTierConnectionOverview get connectionInfo =>
+      EasyTierConnectionOverview.fromSession(state: state, snapshot: snapshot);
+
+  /// 本机节点的当前缓存信息。
+  ///
+  /// 核心尚未返回快照时，各字段使用空值。
+  EasyTierNodeInfo get localNode =>
+      snapshot?.localNode ?? const EasyTierNodeInfo();
+
+  /// 当前网络中的全部对等节点，不包含本机。
+  List<EasyTierOnlineNode> get peerNodes => connectionInfo.peerNodes;
 
   /// 当前保持活动连接的对端节点。
   ///
@@ -74,11 +90,12 @@ final class EasyTierSession {
   /// 供 ValueListenableBuilder 监听的运行快照。
   ValueListenable<EasyTierSessionSnapshot?> get snapshotListenable => _snapshot;
 
-  /// 立即发送当前状态，随后持续发送状态变化。
-  Stream<EasyTierSessionState> get states async* {
-    yield state;
-    yield* _stateController.stream;
-  }
+  /// 立即发送当前状态，随后只监听状态变化。
+  Stream<EasyTierSessionState> get statusChanges =>
+      _currentAndUpdates(state, _stateController.stream);
+
+  /// [statusChanges] 的兼容名称。
+  Stream<EasyTierSessionState> get states => statusChanges;
 
   /// 如果已有快照则立即发送，随后持续发送快照更新。
   Stream<EasyTierSessionSnapshot> get snapshots async* {
@@ -86,6 +103,26 @@ final class EasyTierSession {
     if (current != null) yield current;
     yield* _snapshotController.stream;
   }
+
+  /// 立即发送本机节点信息，随后只监听本机信息更新。
+  Stream<EasyTierNodeInfo> get localNodeChanges => _currentAndUpdates(
+    localNode,
+    _snapshotController.stream.map((snapshot) => snapshot.localNode),
+  );
+
+  /// 立即发送全部对等节点，随后只监听对等节点信息更新。
+  Stream<List<EasyTierOnlineNode>> get peerNodesChanges => _currentAndUpdates(
+    peerNodes,
+    _snapshotController.stream.map(
+      (snapshot) => List<EasyTierOnlineNode>.unmodifiable(
+        snapshot.onlineNodes.where((node) => !node.isLocal),
+      ),
+    ),
+  );
+
+  /// 立即发送当前连接信息，随后持续发送本机状态和节点变化。
+  Stream<EasyTierConnectionOverview> get connectionInfoChanges =>
+      _currentAndUpdates(connectionInfo, _connectionInfoController.stream);
 
   /// EasyTier 核心事件流。
   ///
@@ -104,6 +141,14 @@ final class EasyTierSession {
   Future<EasyTierSessionSnapshot> refresh() async {
     final raw = await _engine.getSessionSnapshot(instanceId);
     return _applySnapshot(raw);
+  }
+
+  /// 向核心刷新一次数据并返回本机状态和全部对等节点信息。
+  ///
+  /// 页面需要持续更新时监听 [connectionInfoChanges]，不需要自行轮询。
+  Future<EasyTierConnectionOverview> getConnectionInfo() async {
+    await refresh();
+    return connectionInfo;
   }
 
   /// 停止当前网络。
@@ -160,6 +205,7 @@ final class EasyTierSession {
     final next = EasyTierSessionSnapshot.fromJson(raw);
     _snapshot.value = next;
     _snapshotController.add(next);
+    _connectionInfoController.add(connectionInfo);
     _eventController.add(
       EasyTierSnapshotUpdated(snapshot: next, receivedAt: next.receivedAt),
     );
@@ -187,6 +233,7 @@ final class EasyTierSession {
     );
     _state.value = next;
     _stateController.add(next);
+    _connectionInfoController.add(connectionInfo);
   }
 
   @internal
@@ -206,7 +253,19 @@ final class EasyTierSession {
     unawaited(_stateController.close());
     unawaited(_snapshotController.close());
     unawaited(_eventController.close());
+    unawaited(_connectionInfoController.close());
     _state.dispose();
     _snapshot.dispose();
   }
 }
+
+Stream<T> _currentAndUpdates<T>(T current, Stream<T> updates) =>
+    Stream.multi((controller) {
+      controller.add(current);
+      final subscription = updates.listen(
+        controller.add,
+        onError: controller.addError,
+        onDone: controller.close,
+      );
+      controller.onCancel = subscription.cancel;
+    });

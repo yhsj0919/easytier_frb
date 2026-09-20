@@ -33,13 +33,10 @@ Future<void> startEasyTier() async {
   final easyTier = await EasyTier.initialize();
   final session = await easyTier.start(config);
 
-  session.states.listen((state) {
-    print('EasyTier 状态：${state.status}');
-  });
-
-  session.snapshots.listen((snapshot) {
-    print('IPv4：${snapshot.virtualIpv4}');
-    print('在线节点数：${snapshot.onlineNodeCount}');
+  session.connectionInfoChanges.listen((info) {
+    print('组网状态：${info.status}');
+    print('本机 IPv4：${info.localNode.virtualIpv4}');
+    print('对等节点数：${info.peerNodes.length}');
   });
 }
 ```
@@ -70,6 +67,18 @@ await easyTier.validate(config);
 ```
 
 ## 会话数据
+
+普通业务优先使用以下三个入口：
+
+- `session.connectionInfo`：读取当前缓存。
+- `await session.getConnectionInfo()`：主动刷新一次。
+- `session.connectionInfoChanges`：持续监听本机状态和全部对等节点。
+
+只关心某一类数据时，可以使用单独入口：
+
+- `session.state` / `session.statusChanges`：当前状态 / 状态监听。
+- `session.localNode` / `session.localNodeChanges`：当前本机信息 / 本机信息监听。
+- `session.peerNodes` / `session.peerNodesChanges`：当前对等节点 / 对等节点监听。
 
 `EasyTierSession.snapshot` 保存最新的不可变运行快照，提供以下类型化字段：
 

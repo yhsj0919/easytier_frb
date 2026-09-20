@@ -88,8 +88,22 @@ final class EasyTierOnlineNode {
   /// 路径需要经过的连接段数。本机为 0，直连为 1。
   int get hopCount => route?.cost ?? 0;
 
-  /// 整条路径的估算延迟，单位为微秒。
-  int get pathLatencyMicros => route?.pathLatencyMicros ?? 0;
+  /// 当前节点的延迟，单位为毫秒。
+  ///
+  /// 直连节点使用活动连接测得的真实延迟；中继节点使用核心提供的
+  /// 低延迟路径估算。核心没有可靠数据时返回 null。
+  double? get latencyMillis {
+    if (isLocal) return null;
+    if (isRelayed) return route?.estimatedLatencyMillis?.toDouble();
+
+    final values = connections
+        .where(
+          (connection) => !connection.isClosed && connection.latencyMicros > 0,
+        )
+        .map((connection) => connection.latencyMicros);
+    if (values.isEmpty) return null;
+    return values.reduce((left, right) => left < right ? left : right) / 1000;
+  }
 
   /// 该节点向 EasyTier 网络公布的代理转发网段。
   List<String> get forwardedNetworks => route?.proxyCidrs ?? const [];
@@ -114,7 +128,7 @@ final class EasyTierRouteInfo {
     this.proxyCidrs = const [],
     this.nextHopPeerId,
     this.cost = 0,
-    this.pathLatencyMicros = 0,
+    this.estimatedLatencyMillis,
     this.version = '',
     this.instanceId = '',
   });
@@ -140,8 +154,8 @@ final class EasyTierRouteInfo {
   /// 核心计算的路由开销。
   final int cost;
 
-  /// 路径延迟，单位为微秒。
-  final int pathLatencyMicros;
+  /// 核心提供的低延迟路径估算，单位为毫秒；未计算时为空。
+  final int? estimatedLatencyMillis;
 
   /// 目标节点报告的 EasyTier 版本。
   final String version;
@@ -157,6 +171,7 @@ final class EasyTierConnectionInfo {
     this.tunnelType = '',
     this.receivedBytes = 0,
     this.transmittedBytes = 0,
+    this.latencyMicros = 0,
     this.isClosed = false,
   });
 
@@ -171,6 +186,9 @@ final class EasyTierConnectionInfo {
 
   /// 当前连接累计发送的字节数。
   final int transmittedBytes;
+
+  /// 当前隧道测得的延迟，单位为微秒；0 表示尚无数据。
+  final int latencyMicros;
 
   /// 当前隧道是否已经关闭。
   final bool isClosed;

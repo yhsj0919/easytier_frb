@@ -156,7 +156,9 @@ List<EasyTierRouteInfo> _routes(Object? value) {
           ? null
           : _integer(map['next_hop_peer_id']),
       cost: _integer(map['cost']),
-      pathLatencyMicros: _integer(map['path_latency']),
+      estimatedLatencyMillis: map['path_latency_latency_first'] == null
+          ? null
+          : _integer(map['path_latency_latency_first']),
       version: _string(
         map['version'],
         fallback: _string(map['easytier_version']),
@@ -186,6 +188,9 @@ List<EasyTierConnectionInfo> _connections(Object? value) {
           receivedBytes: _integer(stats?['rx_bytes'] ?? connection['rx_bytes']),
           transmittedBytes: _integer(
             stats?['tx_bytes'] ?? connection['tx_bytes'],
+          ),
+          latencyMicros: _integer(
+            stats?['latency_us'] ?? connection['latency_us'],
           ),
           isClosed: connection['is_closed'] == true,
         ),

@@ -110,35 +110,74 @@ if (session.isRunning) {
 }
 ```
 
-## 获取虚拟 IP 和连接节点
+## 获取连接状态和节点信息
 
-会话收到第一份核心快照前，虚拟 IP 是空字符串，节点列表为空。
+业务页面优先使用统一的 `connectionInfo`。它明确分为：
+
+- `status`：本机组网状态。
+- `localNode`：本机名称、虚拟 IP、版本和设备信息。
+- `peerNodes`：全部在线对等节点，不包含本机；同时包含直连和中继节点。
+
+一次性刷新并获取最新信息：
 
 ```dart
-session.snapshots.listen((snapshot) {
-  print('本机虚拟 IP：${snapshot.virtualIpv4}');
+final info = await session.getConnectionInfo();
 
-  for (final peer in snapshot.connectedPeers) {
-    print('节点 ID：${peer.peerId}');
-    print('主机名：${peer.hostname}');
-    print('虚拟 IP：${peer.virtualIpv4}');
-    print('连接数：${peer.connections.length}');
-    print('接收字节：${peer.receivedBytes}');
-    print('发送字节：${peer.transmittedBytes}');
-  }
+print('本机状态：${info.status}');
+print('本机名称：${info.localNode.hostname}');
+print('本机 IP：${info.localNode.virtualIpv4}');
+
+for (final peer in info.peerNodes) {
+  print('对端名称：${peer.hostname}');
+  print('对端 IP：${peer.virtualIpv4}');
+  print('连接方式：${peer.status}');
+  print('延迟：${peer.latencyMillis}');
+  print('活动隧道：${peer.connections.length}');
+  print('下一跳：${peer.nextHop?.hostname}');
+}
+```
+
+持续监听本机状态和节点变化：
+
+```dart
+session.connectionInfoChanges.listen((info) {
+  print('本机状态：${info.status}');
+  print('本机 IP：${info.localNode.virtualIpv4}');
+  print('对等节点数：${info.peerNodes.length}');
 });
 ```
 
-也可以直接从会话读取最近一次数据：
+不需要全部数据时，可以分别监听。每个监听都会先发送当前值，再发送后续更新：
 
 ```dart
-print(session.virtualIpv4);
-print(session.peerCount);
-print(session.connectedPeers);
+session.statusChanges.listen((state) {
+  print('组网状态：${state.status}');
+});
+
+session.localNodeChanges.listen((node) {
+  print('本机 IP：${node.virtualIpv4}');
+});
+
+session.peerNodesChanges.listen((nodes) {
+  print('对等节点数：${nodes.length}');
+});
 ```
 
-`connectedPeers` 只包含至少有一条未关闭隧道的节点。一个节点可能同时拥有
-TCP、UDP 或其他多条连接，因此不要用 `connections.length` 当作节点数量。
+只读取内存中最近一次信息，不主动请求核心：
+
+```dart
+final info = session.connectionInfo;
+final status = session.state;
+final localNode = session.localNode;
+final peerNodes = session.peerNodes;
+```
+
+`peerNodes` 中每个节点的 `status` 会明确标记 `direct` 或 `relayed`。
+中继节点还可读取 `nextHop` 和 `nextHopConnections`。`connections` 表示与该节点
+直接建立的底层隧道，一个节点可能同时拥有 TCP、UDP 等多条隧道。
+
+`session.snapshot`、`session.snapshots`、`routes` 和 `connectedPeers` 继续保留，
+用于需要原始路由、流量及隧道数据的高级页面。
 
 ## 在 Flutter 页面中监听
 
@@ -267,13 +306,14 @@ EasyTier 进程。
 | `easyTier.validate(config)` | 只校验类型化配置 |
 | `easyTier.sessions` | 查看当前管理器的会话 |
 | `easyTier.stopAll()` | 停止全部会话 |
+| `session.connectionInfo` | 读取缓存中的本机状态和全部对等节点 |
+| `session.getConnectionInfo()` | 主动刷新并获取一次连接信息 |
+| `session.connectionInfoChanges` | 持续监听本机状态和节点变化 |
+| `session.statusChanges` | 只监听本机组网状态 |
+| `session.localNodeChanges` | 只监听本机节点信息 |
+| `session.peerNodesChanges` | 只监听全部对等节点 |
 | `session.states` | 持续监听生命周期 |
 | `session.snapshots` | 持续监听网络数据 |
 | `session.connectedPeers` | 获取当前连接节点 |
 | `session.stop()` | 停止当前网络 |
-
-
-
-
-
 

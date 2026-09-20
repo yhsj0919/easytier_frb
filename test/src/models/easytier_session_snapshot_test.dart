@@ -18,7 +18,7 @@ void main() {
   "my_node_info":{"virtual_ipv4":"10.10.10.7","virtual_ipv4_cidr":"10.10.10.7/24","hostname":"local","version":"2.6.4","dev_name":"et0"},
   "routes":[{"peer_id":7,"ipv4_addr":{"address":{"addr":168430087},"network_length":24},"hostname":"peer-7","next_hop_peer_id":3,"cost":2,"path_latency":1200,"easytier_version":"2.6.4","inst_id":"network-a"}],
   "peer_route_pairs":[
-    {"peer":{"peer_id":7,"conns":[{"tunnel":{"tunnel_type":"tcp"},"stats":{"rx_bytes":100,"tx_bytes":50},"is_closed":false},{"tunnel_type":"udp","rx_bytes":20,"tx_bytes":10}]}},
+    {"peer":{"peer_id":7,"conns":[{"tunnel":{"tunnel_type":"tcp"},"stats":{"rx_bytes":100,"tx_bytes":50,"latency_us":21500},"is_closed":false},{"tunnel_type":"udp","rx_bytes":20,"tx_bytes":10}]}},
     {"peer":{"peer_id":8,"conns":[{"tunnel":{"tunnel_type":"wg"},"stats":{"rx_bytes":5,"tx_bytes":6},"is_closed":true}]}}
   ]
 }
@@ -58,11 +58,11 @@ void main() {
 {
   "my_node_info":{"peer_id":1,"virtual_ipv4":{"address":{"addr":168430081},"network_length":24},"hostname":"phone","version":"2.6.4"},
   "routes":[
-    {"peer_id":3,"ipv4_addr":{"address":{"addr":168430083},"network_length":24},"hostname":"relay-server","next_hop_peer_id":3,"cost":1,"path_latency":1000,"version":"2.6.4"},
-    {"peer_id":7,"ipv4_addr":{"address":{"addr":168430087},"network_length":24},"hostname":"desktop","proxy_cidrs":["192.168.1.0/24","10.20.0.0/16"],"next_hop_peer_id":3,"cost":2,"path_latency":2500,"version":"2.6.4"}
+    {"peer_id":3,"ipv4_addr":{"address":{"addr":168430083},"network_length":24},"hostname":"relay-server","next_hop_peer_id":3,"cost":1,"path_latency":1,"version":"2.6.4"},
+    {"peer_id":7,"ipv4_addr":{"address":{"addr":168430087},"network_length":24},"hostname":"desktop","proxy_cidrs":["192.168.1.0/24","10.20.0.0/16"],"next_hop_peer_id":3,"cost":2,"path_latency":2,"path_latency_latency_first":37,"version":"2.6.4"}
   ],
   "peer_route_pairs":[
-    {"peer":{"peer_id":3,"conns":[{"tunnel":{"tunnel_type":"tcp"},"stats":{"rx_bytes":100,"tx_bytes":50},"is_closed":false}]}}
+    {"peer":{"peer_id":3,"conns":[{"tunnel":{"tunnel_type":"tcp"},"stats":{"rx_bytes":100,"tx_bytes":50,"latency_us":21500},"is_closed":false}]}}
   ]
 }
 ''');
@@ -78,6 +78,7 @@ void main() {
     expect(direct.status, EasyTierNodeConnectionStatus.direct);
     expect(direct.connections.single.tunnelType, 'tcp');
     expect(direct.nextHop, isNull);
+    expect(direct.latencyMillis, 21.5);
 
     final relayed = snapshot.onlineNodes[2];
     expect(relayed.status, EasyTierNodeConnectionStatus.relayed);
@@ -88,6 +89,7 @@ void main() {
     expect(relayed.nextHopConnections.single.tunnelType, 'tcp');
     expect(relayed.forwardedNetworks, ['192.168.1.0/24', '10.20.0.0/16']);
     expect(relayed.route?.proxyCidrs, relayed.forwardedNetworks);
+    expect(relayed.latencyMillis, 37);
   });
   test('tolerates missing and malformed optional collections', () {
     final snapshot = EasyTierSessionSnapshot.fromJson(

@@ -6,6 +6,7 @@ library;
 export 'src/config/easytier_config.dart';
 export 'src/core/easytier.dart';
 export 'src/models/easytier_event.dart';
+export 'src/models/easytier_connection_overview.dart';
 export 'src/models/easytier_exception.dart';
 export 'src/models/easytier_network_info.dart';
 export 'src/models/easytier_session_snapshot.dart';

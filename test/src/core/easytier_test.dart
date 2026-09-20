@@ -283,12 +283,87 @@ void main() {
       expect(engine.startedToml, hasLength(2));
     });
 
+    test('静态获取本机状态和全部对等节点', () async {
+      engine.snapshotJson = r'''
+{
+  "my_node_info":{"peer_id":1,"virtual_ipv4":{"address":{"addr":168430081},"network_length":24},"hostname":"local","version":"2.6.4"},
+  "routes":[
+    {"peer_id":2,"ipv4_addr":{"address":{"addr":168430082},"network_length":24},"hostname":"direct","next_hop_peer_id":2,"cost":1,"version":"2.6.4"},
+    {"peer_id":3,"ipv4_addr":{"address":{"addr":168430083},"network_length":24},"hostname":"relayed","next_hop_peer_id":2,"cost":2,"version":"2.6.4"}
+  ],
+  "peer_route_pairs":[]
+}
+''';
+      final session = await easyTier.startToml('instance_name = "info"');
+      await Future<void>.delayed(Duration.zero);
+
+      final info = await session.getConnectionInfo();
+
+      expect(info.status, EasyTierSessionStatus.running);
+      expect(info.localNode.hostname, 'local');
+      expect(info.peerNodes.map((node) => node.hostname), [
+        'direct',
+        'relayed',
+      ]);
+      expect(info.directPeerNodes.single.hostname, 'direct');
+      expect(info.relayedPeerNodes.single.hostname, 'relayed');
+    });
+
+    test('监听本机状态和对等节点变化', () async {
+      final session = await easyTier.startToml('instance_name = "listen"');
+      await Future<void>.delayed(Duration.zero);
+      final nextInfo = session.connectionInfoChanges.skip(1).first;
+      engine.snapshotJson = r'''
+{
+  "my_node_info":{"peer_id":1,"virtual_ipv4":{"address":{"addr":168430081},"network_length":24},"hostname":"local"},
+  "routes":[{"peer_id":2,"ipv4_addr":{"address":{"addr":168430082},"network_length":24},"hostname":"peer","next_hop_peer_id":2,"cost":1}],
+  "peer_route_pairs":[]
+}
+''';
+
+      await session.getConnectionInfo();
+      final info = await nextInfo;
+
+      expect(info.isRunning, isTrue);
+      expect(info.localNode.hostname, 'local');
+      expect(info.peerNodes.single.hostname, 'peer');
+    });
+
+    test('可以分别监听状态、本机节点和对等节点', () async {
+      final session = await easyTier.startToml('instance_name = "separate"');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        (await session.statusChanges.first).status,
+        EasyTierSessionStatus.running,
+      );
+
+      final nextLocalNode = session.localNodeChanges.skip(1).first;
+      final nextPeerNodes = session.peerNodesChanges.skip(1).first;
+      engine.snapshotJson = r'''
+{
+  "my_node_info":{"peer_id":1,"virtual_ipv4":{"address":{"addr":168430081},"network_length":24},"hostname":"local"},
+  "routes":[{"peer_id":2,"ipv4_addr":{"address":{"addr":168430082},"network_length":24},"hostname":"peer","next_hop_peer_id":2,"cost":1}],
+  "peer_route_pairs":[]
+}
+''';
+
+      await session.refresh();
+
+      expect((await nextLocalNode).hostname, 'local');
+      expect((await nextPeerNodes).single.hostname, 'peer');
+      expect(session.localNode.hostname, 'local');
+      expect(session.peerNodes.single.hostname, 'peer');
+    });
+
     test('emits the current state and stop transitions', () async {
       final session = await easyTier.start(
         const EasyTierConfig.fromToml('instance_name = "state-test"'),
       );
-      final statesFuture = session.states.take(3).toList();
-      await Future<void>.delayed(Duration.zero);
+      await session.statusChanges.firstWhere(
+        (state) => state.status == EasyTierSessionStatus.running,
+      );
+      final statesFuture = session.statusChanges.take(3).toList();
 
       await session.stop();
       final states = await statesFuture;

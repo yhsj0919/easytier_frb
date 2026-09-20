@@ -410,8 +410,8 @@ class _EasyTierDemoPageState extends State<EasyTierDemoPage> {
         '下一跳：${nextHop.hostname.isEmpty ? '节点 ${nextHop.peerId}' : nextHop.hostname}'
             ' · ${nextHop.ipv4Address.isEmpty ? 'IP 未知' : nextHop.ipv4Address}'
             ' · ID ${nextHop.peerId}',
-      if (!node.isLocal && node.pathLatencyMicros > 0)
-        '路径延迟：${(node.pathLatencyMicros / 1000).toStringAsFixed(1)} ms',
+      if (node.latencyMillis != null)
+        '路径延迟：${node.latencyMillis!.toStringAsFixed(1)} ms',
       if (node.forwardedNetworks.isNotEmpty)
         '转发网段：${node.forwardedNetworks.join(', ')}',
     ];
