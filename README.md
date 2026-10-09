@@ -166,8 +166,8 @@ Windows 使用 TUN 模式时，插件会在启动核心前检查管理员权限�
 
 | 平台 | 工程与构建接入 | 运行验证 |
 | --- | --- | --- |
-| Windows | 已完成 | 已完成：权限预检、管理员模式、TUN、DHCP、与官方客户端双向通信 |
-| Android | 已完成 | 已完成：连接、后台保持、页面恢复、防重复启动 |
+| Windows | 已完成 | 已完成：权限预检、管理员模式、TUN、DHCP、与官方客户端通信、多组网并行及单会话停止/重启隔离 |
+| Android | 已完成 | 已完成：连接、停止、重启、后台保持、页面恢复、防重复启动、路由掩码修复后的启动 |
 | iOS | 已完成 | 待 Apple 主机和设备验证 |
 | macOS | 已完成 | 待 Apple 主机验证 |
 | Linux | 已完成 | 待 Linux 主机验证 |
@@ -175,6 +175,8 @@ Windows 使用 TUN 模式时，插件会在启动核心前检查管理员权限�
 | Web | 未接入 | 不支持 |
 
 完整的新手 API 指南见 [docs/API.md](docs/API.md)。原生构建说明见 [docs/BUILD.md](docs/BUILD.md)，范围和设计决策见 [docs/REBUILD_PLAN.md](docs/REBUILD_PLAN.md)。
+
+Windows 和 Android 的实测结果及待测项目见 [docs/TESTING.md](docs/TESTING.md)。
 
 ## 开发检查
 

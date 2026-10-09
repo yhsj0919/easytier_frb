@@ -338,7 +338,7 @@ Flutter 页面也可以监听 `easyTier.errorListenable`。该入口包含启动
 每次启动都会返回一个会话。分别保存这些会话即可独立停止网络：
 
 ```dart
-final office = await easyTier.startToml(officeToml);
+var office = await easyTier.startToml(officeToml);
 final home = await easyTier.startToml(homeToml);
 
 print(easyTier.sessions.length);
@@ -376,6 +376,9 @@ await easyTier.shutdown();
 
 移动平台是否能同时运行多个系统 VPN 会受到操作系统限制。插件不会静默切换或
 覆盖已有会话，失败时会通过异常或会话状态明确报告。
+
+Android 当前只允许一个系统 VPN 会话。Windows 多组网并行及单会话停止、重启
+隔离已通过实测。完整结果见 [测试记录](TESTING.md)。
 
 ## 对象生命周期
 
