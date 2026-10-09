@@ -40,6 +40,80 @@ pub fn validate_toml(toml: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// 返回配置是否需要创建 TUN 虚拟网卡。
+#[flutter_rust_bridge::frb(sync)]
+pub fn config_requires_tun(toml: String) -> Result<bool, String> {
+    TomlConfigLoader::new_from_str(&toml)
+        .map(|config| !config.get_flags().no_tun)
+        .map_err(|error| error.to_string())
+}
+
+/// 返回配置中声明的全部本地监听地址。
+#[flutter_rust_bridge::frb(sync)]
+pub fn config_listener_urls(toml: String) -> Result<Vec<String>, String> {
+    TomlConfigLoader::new_from_str(&toml)
+        .map(|config| {
+            config
+                .get_listeners()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|listener| listener.to_string())
+                .collect()
+        })
+        .map_err(|error| error.to_string())
+}
+
+/// 返回配置中指定的静态虚拟 IPv4。
+#[flutter_rust_bridge::frb(sync)]
+pub fn config_virtual_ipv4(toml: String) -> Result<Option<String>, String> {
+    TomlConfigLoader::new_from_str(&toml)
+        .map(|config| config.get_ipv4().map(|address| address.to_string()))
+        .map_err(|error| error.to_string())
+}
+
+/// 返回当前进程是否具备创建系统 TUN 设备所需的权限。
+#[flutter_rust_bridge::frb(sync)]
+pub fn has_tun_privileges() -> bool {
+    has_platform_tun_privileges()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn has_platform_tun_privileges() -> bool {
+    true
+}
+
+#[cfg(target_os = "windows")]
+fn has_platform_tun_privileges() -> bool {
+    use std::{ffi::c_void, mem::size_of};
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        Security::{
+            GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+        },
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+
+    unsafe {
+        let mut token = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+
+        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut returned_size = 0;
+        let success = GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elevation as *mut TOKEN_ELEVATION as *mut c_void,
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned_size,
+        ) != 0;
+        CloseHandle(token);
+
+        success && elevation.TokenIsElevated != 0
+    }
+}
+
 /// 启动一个 EasyTier 网络并返回核心实例 UUID。
 pub fn start_from_toml(toml: String, force_no_tun: bool) -> Result<String, String> {
     let config = TomlConfigLoader::new_from_str(&toml)

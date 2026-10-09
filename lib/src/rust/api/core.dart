@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `instance_manager`, `parse_core_instance_id`, `parse_instance_id`
+// These functions are ignored because they are not marked as `pub`: `has_platform_tun_privileges`, `instance_manager`, `parse_core_instance_id`, `parse_instance_id`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `MANAGER`, `RUNTIME`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `deref`, `deref`, `initialize`, `initialize`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `initialize_core`
@@ -18,6 +18,21 @@ String easytierVersion() => RustLib.instance.api.crateApiCoreEasytierVersion();
 /// 解析并校验 EasyTier TOML 配置，但不启动网络。
 Future<void> validateToml({required String toml}) =>
     RustLib.instance.api.crateApiCoreValidateToml(toml: toml);
+
+/// 返回配置是否需要创建 TUN 虚拟网卡。
+bool configRequiresTun({required String toml}) =>
+    RustLib.instance.api.crateApiCoreConfigRequiresTun(toml: toml);
+
+/// 返回配置中声明的全部本地监听地址。
+List<String> configListenerUrls({required String toml}) =>
+    RustLib.instance.api.crateApiCoreConfigListenerUrls(toml: toml);
+
+/// 返回配置中指定的静态虚拟 IPv4。
+String? configVirtualIpv4({required String toml}) =>
+    RustLib.instance.api.crateApiCoreConfigVirtualIpv4(toml: toml);
+
+/// 返回当前进程是否具备创建系统 TUN 设备所需的权限。
+bool hasTunPrivileges() => RustLib.instance.api.crateApiCoreHasTunPrivileges();
 
 /// 启动一个 EasyTier 网络并返回核心实例 UUID。
 Future<String> startFromToml({

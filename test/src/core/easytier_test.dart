@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:easytier_frb/easytier_frb.dart';
 import 'package:easytier_frb/src/core/easytier_engine.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,6 +18,23 @@ class _FakeEngine implements EasyTierEngine {
       '{"virtual_ipv4_host":"10.126.0.1","dev_name":"et0","peer_count":2}';
   int stopAllCalls = 0;
   int _nextId = 0;
+  bool requiresTun = true;
+  bool tunPrivileges = true;
+  List<String> listenerUrls = [];
+  String? virtualIpv4;
+  bool stopImmediately = false;
+
+  @override
+  bool configRequiresTun(String toml) => requiresTun;
+
+  @override
+  List<String> configListenerUrls(String toml) => listenerUrls;
+
+  @override
+  String? configVirtualIpv4(String toml) => virtualIpv4;
+
+  @override
+  bool get hasTunPrivileges => tunPrivileges;
 
   @override
   Future<void> validateToml(String toml) async {
@@ -59,7 +78,11 @@ class _FakeEngine implements EasyTierEngine {
 
   @override
   Stream<EngineSessionMessage> watchSession(String instanceId) =>
-      Stream.value(EngineSessionMessage(kind: 'snapshot', json: snapshotJson));
+      Stream.fromIterable([
+        EngineSessionMessage(kind: 'snapshot', json: snapshotJson),
+        if (stopImmediately)
+          const EngineSessionMessage(kind: 'stopped', json: ''),
+      ]);
 }
 
 void main() {
@@ -249,6 +272,35 @@ void main() {
       expect(session.peerCount, 2);
       expect(session.connectedPeers, isEmpty);
     });
+
+    test('可以等待组网进入运行状态并获得虚拟 IP', () async {
+      final session = await easyTier.startAndWait(
+        const EasyTierConfig.fromToml('instance_name = "ready"'),
+      );
+
+      expect(session.isRunning, isTrue);
+      expect(session.virtualIpv4, '10.126.0.1');
+    });
+
+    test('等待虚拟 IP 超时会返回明确错误并保留会话', () async {
+      engine.snapshotJson = '{}';
+      final session = await easyTier.startToml('instance_name = "timeout"');
+
+      await expectLater(
+        session.waitUntilReady(timeout: const Duration(milliseconds: 10)),
+        throwsA(
+          isA<EasyTierException>().having(
+            (error) => error.code,
+            'code',
+            EasyTierErrorCode.startupTimeout,
+          ),
+        ),
+      );
+
+      expect(session.isCoreRunning, isTrue);
+      expect(easyTier.sessions, contains(session));
+      expect(easyTier.lastError?.code, EasyTierErrorCode.startupTimeout);
+    });
     test('页面重建后可接管原生核心中仍在运行的会话', () async {
       const instanceId = '00000000-0000-0000-0000-000000000099';
       engine.runningIds.add(instanceId);
@@ -356,6 +408,32 @@ void main() {
       expect(session.peerNodes.single.hostname, 'peer');
     });
 
+    test('可以分别读取和监听路由、底层连接和流量', () async {
+      final session = await easyTier.startToml('instance_name = "details"');
+      await Future<void>.delayed(Duration.zero);
+      final nextRoutes = session.routeChanges.skip(1).first;
+      final nextConnections = session.connectionChanges.skip(1).first;
+      final nextTraffic = session.trafficChanges.skip(1).first;
+      engine.snapshotJson = r'''
+{
+  "routes":[{"peer_id":2,"ipv4_addr":{"address":{"addr":168430082},"network_length":24},"hostname":"peer","next_hop_peer_id":2,"cost":1}],
+  "peer_route_pairs":[{"peer":{"peer_id":2,"conns":[{"tunnel":{"tunnel_type":"tcp"},"stats":{"rx_bytes":120,"tx_bytes":80,"latency_us":3000},"is_closed":false}]}}]
+}
+''';
+
+      await session.refresh();
+
+      expect((await nextRoutes).single.hostname, 'peer');
+      expect((await nextConnections).single.tunnelType, 'tcp');
+      final traffic = await nextTraffic;
+      expect(traffic.totalReceivedBytes, 120);
+      expect(traffic.totalTransmittedBytes, 80);
+      expect(traffic.peers.single.peerId, 2);
+      expect(session.routes.single.peerId, 2);
+      expect(session.connections.single.latencyMicros, 3000);
+      expect(session.traffic.totalReceivedBytes, 120);
+    });
+
     test('emits the current state and stop transitions', () async {
       final session = await easyTier.start(
         const EasyTierConfig.fromToml('instance_name = "state-test"'),
@@ -428,9 +506,120 @@ void main() {
       );
     });
 
+    test('Windows 权限不足时在启动核心前返回明确错误', () async {
+      engine.tunPrivileges = false;
+      final nextError = easyTier.errorChanges.first;
+
+      await expectLater(
+        easyTier.startToml('instance_name = "needs-admin"'),
+        throwsA(
+          isA<EasyTierException>()
+              .having(
+                (error) => error.code,
+                'code',
+                EasyTierErrorCode.administratorPrivilegeRequired,
+              )
+              .having((error) => error.recoverable, 'recoverable', isTrue),
+        ),
+      );
+
+      expect(engine.startedToml, isEmpty);
+      expect(
+        (await nextError).code,
+        EasyTierErrorCode.administratorPrivilegeRequired,
+      );
+      expect(
+        easyTier.lastError?.code,
+        EasyTierErrorCode.administratorPrivilegeRequired,
+      );
+
+      easyTier.clearLastError();
+      expect(easyTier.lastError, isNull);
+    });
+
+    test('启动前检查返回被占用的监听端口', () async {
+      final occupied = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(occupied.close);
+      engine.listenerUrls = ['tcp://127.0.0.1:${occupied.port}'];
+
+      final result = await easyTier.preflight(
+        const EasyTierConfig.fromToml('instance_name = "port-check"'),
+      );
+
+      expect(result.canStart, isFalse);
+      expect(result.issues, hasLength(1));
+      expect(result.issues.single.code, EasyTierErrorCode.listenerPortInUse);
+      expect(result.issues.single.message, contains('${occupied.port}'));
+      expect(easyTier.lastError, isNull);
+    });
+
+    test('启动前检查发现当前插件会话使用了相同虚拟 IP', () async {
+      await easyTier.startToml('instance_name = "first"');
+      await Future<void>.delayed(Duration.zero);
+      engine.virtualIpv4 = '10.126.0.1/24';
+
+      final result = await easyTier.preflight(
+        const EasyTierConfig.fromToml('instance_name = "duplicate-ip"'),
+      );
+
+      expect(result.canStart, isFalse);
+      expect(result.issues.single.code, EasyTierErrorCode.virtualIpConflict);
+    });
+
+    test('启动前检查发现系统网卡使用了相同虚拟 IP', () async {
+      engine.virtualIpv4 = '127.0.0.1/8';
+
+      final result = await easyTier.preflight(
+        const EasyTierConfig.fromToml('instance_name = "system-ip"'),
+      );
+
+      expect(result.canStart, isFalse);
+      expect(result.issues.single.code, EasyTierErrorCode.virtualIpConflict);
+      expect(result.issues.single.message, contains('系统网卡'));
+    });
+
+    test('核心非用户操作退出时报告全局错误而不是普通停止', () async {
+      engine.stopImmediately = true;
+
+      final session = await easyTier.startToml(
+        'instance_name = "unexpected-stop"',
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(session.state.status, EasyTierSessionStatus.failed);
+      expect(
+        session.state.failure,
+        isA<EasyTierException>().having(
+          (error) => error.code,
+          'code',
+          EasyTierErrorCode.coreStoppedUnexpectedly,
+        ),
+      );
+      expect(
+        easyTier.lastError?.code,
+        EasyTierErrorCode.coreStoppedUnexpectedly,
+      );
+      expect(easyTier.sessions, isEmpty);
+    });
+
+    test('no_tun 模式不受 Windows 管理员权限检查影响', () async {
+      engine.tunPrivileges = false;
+      engine.requiresTun = false;
+
+      final session = await easyTier.startToml('''
+instance_name = "no-tun"
+[flags]
+no_tun = true
+''');
+
+      expect(session.instanceId, isNotEmpty);
+      expect(engine.startedToml, hasLength(1));
+    });
+
     test('将运行快照中的设备占用错误转换为失败状态', () async {
       engine.snapshotJson =
           '{"error_msg":"Wintun adapter is in use by another process"}';
+      final nextError = easyTier.errorChanges.first;
 
       final session = await easyTier.start(
         const EasyTierConfig.fromToml('instance_name = "snapshot-conflict"'),
@@ -446,6 +635,8 @@ void main() {
           EasyTierErrorCode.resourceConflict,
         ),
       );
+      expect((await nextError).code, EasyTierErrorCode.resourceConflict);
+      expect(easyTier.lastError?.code, EasyTierErrorCode.resourceConflict);
     });
     test('stops all sessions through one core operation', () async {
       final first = await easyTier.start(
@@ -461,6 +652,56 @@ void main() {
       expect(first.state.status, EasyTierSessionStatus.stopped);
       expect(second.state.status, EasyTierSessionStatus.stopped);
       expect(easyTier.sessions, isEmpty);
+    });
+
+    test('安全退出会停止全部会话并且可以重复调用', () async {
+      await easyTier.startToml('instance_name = "first"');
+      await easyTier.startToml('instance_name = "second"');
+
+      await easyTier.shutdown();
+      await easyTier.shutdown();
+
+      expect(engine.stopAllCalls, 1);
+      expect(easyTier.sessions, isEmpty);
+      expect(
+        () => easyTier.startToml('instance_name = "after-shutdown"'),
+        throwsStateError,
+      );
+    });
+
+    test('受控重启会停止旧会话并返回已经就绪的新会话', () async {
+      final oldSession = await easyTier.startToml('instance_name = "old"');
+
+      final newSession = await oldSession.restartWithToml(
+        'instance_name = "new"',
+      );
+
+      expect(newSession.instanceId, isNot(oldSession.instanceId));
+      expect(newSession.isRunning, isTrue);
+      expect(newSession.virtualIpv4, '10.126.0.1');
+      expect(oldSession.state.status, EasyTierSessionStatus.stopped);
+      expect(engine.stoppedIds, [oldSession.instanceId]);
+      expect(easyTier.sessions, [newSession]);
+    });
+
+    test('受控重启的新配置无效时保留旧会话', () async {
+      final oldSession = await easyTier.startToml('instance_name = "old"');
+      engine.validationError = StateError('bad replacement');
+
+      await expectLater(
+        oldSession.restartWithToml('invalid replacement'),
+        throwsA(
+          isA<EasyTierException>().having(
+            (error) => error.code,
+            'code',
+            EasyTierErrorCode.invalidConfig,
+          ),
+        ),
+      );
+
+      expect(oldSession.isCoreRunning, isTrue);
+      expect(engine.stoppedIds, isEmpty);
+      expect(easyTier.sessions, [oldSession]);
     });
   });
 }

@@ -639,11 +639,12 @@ EasyTier 当前使用 LGPL-3.0。新项目开始时必须完成：
 
 ### 阶段 3：桌面平台
 
+- [x] 统一启动前检查配置、权限、显式监听端口和当前会话虚拟 IP 冲突。
 - [x] Windows 管理员模式启动并创建 TUN。
 - [x] Windows 通过 DHCP 获取虚拟 IPv4。
 - [x] Windows 插件节点主动访问官方 EasyTier 客户端。
 - [x] 官方 EasyTier 客户端反向访问 Windows 插件节点。
-- [ ] Windows 权限不足的明确诊断和提示。
+- [x] Windows 权限不足的明确诊断和提示。
 - [ ] Linux、macOS 直接 TUN 真机验证。
 - [ ] 桌面多网络并行。
 - [ ] 资源清理和异常退出恢复。

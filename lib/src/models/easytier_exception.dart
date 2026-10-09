@@ -9,17 +9,35 @@ enum EasyTierErrorCode {
   /// 端口、虚拟网卡或其他系统资源已被占用。
   resourceConflict,
 
+  /// 配置声明的本地监听端口当前无法绑定。
+  listenerPortInUse,
+
+  /// 静态虚拟 IPv4 与当前插件会话重复。
+  virtualIpConflict,
+
   /// 当前平台限制了可同时运行的会话数量。
   platformSessionLimit,
 
   /// 用户尚未授予 Android 系统 VPN 权限。
   vpnPermissionDenied,
 
+  /// Windows 当前进程没有创建 TUN 虚拟网卡所需的管理员权限。
+  administratorPrivilegeRequired,
+
   /// EasyTier 核心启动失败。
   coreStartFailed,
 
+  /// 等待组网获得虚拟 IP 超时。
+  startupTimeout,
+
   /// EasyTier 核心停止失败。
   coreStopFailed,
+
+  /// 等待全部组网安全停止超时。
+  shutdownTimeout,
+
+  /// EasyTier 核心并非由用户操作而意外停止。
+  coreStoppedUnexpectedly,
 
   /// 未能进一步分类的错误。
   unknown,

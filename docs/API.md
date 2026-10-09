@@ -15,20 +15,34 @@ const config = EasyTierConfig(
   networkSecret: 'replace-me',
   instanceName: 'my-network',
   hostname: 'my-device',
-  listeners: ['tcp://0.0.0.0:11010'],
   peers: [EasyTierPeer('tcp://server.example.com:11010')],
   flags: EasyTierFlags(enableUdpBroadcastRelay: true),
 );
 
 Future<void> runNetwork() async {
   final easyTier = await EasyTier.initialize();
-  final session = await easyTier.start(config);
+  final session = await easyTier.startAndWait(config);
 
   print('实例 ID：${session.instanceId}');
   await session.stop();
   easyTier.dispose();
 }
 ```
+
+`startAndWait()` 是最简单的入口：核心运行且获得虚拟 IPv4 后才返回。如果页面
+需要先显示启动过程，可以改用：
+
+```dart
+final session = await easyTier.start(config);
+session.statusChanges.listen((state) => print(state.status));
+await session.waitUntilReady();
+```
+
+默认等待 20 秒。超时会抛出 `startupTimeout`，但不会强制停止仍可能继续连接的
+会话。TOML 和文件入口也提供 `startTomlAndWait()`、`startFileAndWait()`。
+
+客户端通常不需要配置 `listeners`。保持默认空列表不会禁用 P2P，核心仍会通过
+入口节点发现其他节点并尝试打洞；只有需要通过固定端口接受主动连接时才填写。
 
 未填写 `ipv4` 时，插件启动核心前会默认启用 DHCP。`start` 会把配置对象转换为 TOML、校验，然后启动核心。
 
@@ -57,6 +71,25 @@ final toml = config.toToml();
 ```dart
 await easyTier.validate(config);
 ```
+
+启动前同时检查配置、权限、监听端口和当前会话冲突：
+
+```dart
+final result = await easyTier.preflight(config);
+
+if (!result.canStart) {
+  for (final issue in result.issues) {
+    print(issue.message);
+    print(issue.suggestion);
+  }
+  return;
+}
+
+final session = await easyTier.start(config);
+```
+
+直接调用 `start()` 也会自动执行同一套检查。`preflight()` 适合在页面上提前
+展示问题，不会启动核心，也不会写入 `lastError`。
 
 ## TOML 高级模式
 
@@ -161,6 +194,19 @@ session.localNodeChanges.listen((node) {
 session.peerNodesChanges.listen((nodes) {
   print('对等节点数：${nodes.length}');
 });
+
+session.routeChanges.listen((routes) {
+  print('路由数：${routes.length}');
+});
+
+session.connectionChanges.listen((connections) {
+  print('底层连接数：${connections.length}');
+});
+
+session.trafficChanges.listen((traffic) {
+  print('接收：${traffic.totalReceivedBytes}');
+  print('发送：${traffic.totalTransmittedBytes}');
+});
 ```
 
 只读取内存中最近一次信息，不主动请求核心：
@@ -170,6 +216,9 @@ final info = session.connectionInfo;
 final status = session.state;
 final localNode = session.localNode;
 final peerNodes = session.peerNodes;
+final routes = session.routes;
+final connections = session.connections;
+final traffic = session.traffic;
 ```
 
 `peerNodes` 中每个节点的 `status` 会明确标记 `direct` 或 `relayed`。
@@ -246,6 +295,8 @@ try {
       print('TOML 配置无效');
     case EasyTierErrorCode.resourceConflict:
       print('端口或虚拟网卡已被其他程序占用');
+    case EasyTierErrorCode.administratorPrivilegeRequired:
+      print('请以管理员身份重新启动 Windows 应用');
     default:
       print(error.message);
   }
@@ -254,6 +305,30 @@ try {
   print(error.technicalDetails);
 }
 ```
+
+静态虚拟 IP 启动前会同时检查当前插件会话和系统网卡。核心没有经过用户停止
+操作却自行退出时，会报告 `coreStoppedUnexpectedly` 并写入全局错误入口，不会
+伪装成一次正常停止。
+
+Windows 使用 TUN 模式启动前，插件会检查当前进程是否具有管理员权限。权限
+不足时会直接抛出 `administratorPrivilegeRequired`，不会继续启动核心。配置中
+明确设置 `flags.no_tun = true` 时不需要这项权限。
+
+不使用日志页面时，可以从管理器统一获取错误：
+
+```dart
+final currentError = easyTier.lastError;
+
+easyTier.errorChanges.listen((error) {
+  showError(error.message);
+});
+
+// 页面已经处理提示后清除缓存。
+easyTier.clearLastError();
+```
+
+Flutter 页面也可以监听 `easyTier.errorListenable`。该入口包含启动、配置校验和
+会话运行错误；`message` 可直接展示给用户，`technicalDetails` 只建议写入诊断日志。
 
 有些系统资源错误会在核心实例创建后才出现。此时 `startToml` 已经返回，
 但会话随后进入 `failed` 状态。页面应同时监听 `session.states`。
@@ -272,8 +347,32 @@ await office.stop();
 await home.stop();
 ```
 
+修改配置时执行受控重启：
+
+```dart
+office = await office.restartWith(newOfficeConfig);
+// 高级 TOML 入口：office.restartWithToml(newToml)
+```
+
+插件会先校验新配置。校验失败时旧会话继续运行；校验通过后才停止旧会话，
+重新执行启动前检查并等待新会话获得虚拟 IP。这不是热配置，返回值是新的
+`EasyTierSession`，启动失败后不会自动回滚旧配置。
+
+示例应用允许在组网运行时继续编辑 TOML。点击“重启”会调用
+`restartWithToml()`，可用于验证配置校验、旧会话停止和新会话接管流程。
+
 调用 `easyTier.stopAll()` 可以停止当前管理器启动的全部网络。它不会关闭其他
 EasyTier 进程。
+
+桌面应用在用户明确退出程序时使用：
+
+```dart
+await easyTier.shutdown();
+```
+
+它会停止全部自有会话、等待资源清理并释放管理器。默认等待 5 秒，超时返回
+`shutdownTimeout`。强制结束进程时无法保证异步清理代码得到调用，因此宿主仍
+应正确处理下一次启动时的系统资源检查。
 
 移动平台是否能同时运行多个系统 VPN 会受到操作系统限制。插件不会静默切换或
 覆盖已有会话，失败时会通过异常或会话状态明确报告。
@@ -312,6 +411,9 @@ EasyTier 进程。
 | `session.statusChanges` | 只监听本机组网状态 |
 | `session.localNodeChanges` | 只监听本机节点信息 |
 | `session.peerNodesChanges` | 只监听全部对等节点 |
+| `session.routeChanges` | 只监听路由信息 |
+| `session.connectionChanges` | 只监听底层隧道连接 |
+| `session.trafficChanges` | 只监听总流量和各节点流量 |
 | `session.states` | 持续监听生命周期 |
 | `session.snapshots` | 持续监听网络数据 |
 | `session.connectedPeers` | 获取当前连接节点 |

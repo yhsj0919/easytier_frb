@@ -151,7 +151,7 @@ await easyTier.refreshSnapshot(); // 手动拉一次核心 JSON（运行中）
 ```toml
 instance_name = "my-app"
 hostname = "my-pc"                    # 可省略，插件会按平台自动填充
-listeners = ["tcp://0.0.0.0:11010"]   # 桌面若省略，插件默认 tcp://0.0.0.0:11010
+listeners = []                         # 普通客户端不需要固定监听端口
 
 [network_identity]
 network_name = "my-network"
@@ -166,7 +166,7 @@ uri = "tcp://relay.example.com:11010"
 | 场景 | 行为 |
 |------|------|
 | 未写 `hostname` | Android 用设备名；桌面用 `Platform.localHostname` |
-| 桌面未写 `listeners` | 注入 `tcp://0.0.0.0:11010` |
+| 未写 `listeners` | 不注入固定监听端口，不影响 P2P 打洞和直连 |
 | Android 启动 | 设置 `flags.no_tun = true`，TUN 由系统 VPN 提供 |
 | 未写 ipv4 | 自动启用 EasyTier DHCP |
 | 未传 `configId` | 使用 TOML `instance_id`，否则生成 UUID |

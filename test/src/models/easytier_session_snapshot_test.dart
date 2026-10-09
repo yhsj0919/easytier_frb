@@ -102,6 +102,26 @@ void main() {
     expect(snapshot.errorMessage, 'conflict');
   });
 
+  test('在线节点默认按虚拟 IPv4 数值排序', () {
+    final snapshot = EasyTierSessionSnapshot.fromJson(r'''
+{
+  "my_node_info":{"peer_id":1,"virtual_ipv4":{"address":{"addr":168430090},"network_length":24},"hostname":"local"},
+  "routes":[
+    {"peer_id":9,"ipv4_addr":{"address":{"addr":168430089},"network_length":24},"hostname":"nine","cost":1},
+    {"peer_id":2,"ipv4_addr":{"address":{"addr":168430082},"network_length":24},"hostname":"two","cost":1},
+    {"peer_id":20,"hostname":"unknown","cost":2}
+  ]
+}
+''');
+
+    expect(snapshot.onlineNodes.map((node) => node.virtualIpv4), [
+      '10.10.10.2',
+      '10.10.10.9',
+      '10.10.10.10',
+      '',
+    ]);
+  });
+
   test('rejects a non-object root', () {
     expect(() => EasyTierSessionSnapshot.fromJson('[]'), throwsFormatException);
   });

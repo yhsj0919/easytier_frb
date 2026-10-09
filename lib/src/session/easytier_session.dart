@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../config/easytier_config.dart';
 import '../core/easytier_engine.dart';
 import '../core/easytier_error_classifier.dart';
 import '../models/easytier_connection_overview.dart';
@@ -19,6 +20,8 @@ final class EasyTierSession {
     this.configSource,
     this._engine,
     this._onStopped,
+    this._onFailure,
+    this._restart,
   ) : _state = ValueNotifier(
         EasyTierSessionState(
           status: EasyTierSessionStatus.starting,
@@ -37,6 +40,13 @@ final class EasyTierSession {
   final String configSource;
   final EasyTierEngine _engine;
   final void Function(EasyTierSession session) _onStopped;
+  final void Function(EasyTierException error) _onFailure;
+  final Future<EasyTierSession> Function(
+    EasyTierSession session,
+    EasyTierConfig config,
+    Duration timeout,
+  )
+  _restart;
   final ValueNotifier<EasyTierSessionState> _state;
   final ValueNotifier<EasyTierSessionSnapshot?> _snapshot = ValueNotifier(null);
   final StreamController<EasyTierSessionState> _stateController =
@@ -70,6 +80,20 @@ final class EasyTierSession {
 
   /// 当前网络中的全部对等节点，不包含本机。
   List<EasyTierOnlineNode> get peerNodes => connectionInfo.peerNodes;
+
+  /// 当前核心学习到的全部路由。
+  List<EasyTierRouteInfo> get routes => snapshot?.routes ?? const [];
+
+  /// 当前核心报告的全部底层隧道连接。
+  List<EasyTierConnectionInfo> get connections =>
+      snapshot?.connections ?? const [];
+
+  /// 当前缓存的总流量和各节点流量。
+  EasyTierTrafficInfo get traffic => EasyTierTrafficInfo(
+    totalReceivedBytes: snapshot?.totalReceivedBytes ?? 0,
+    totalTransmittedBytes: snapshot?.totalTransmittedBytes ?? 0,
+    peers: snapshot?.peerTraffic ?? const [],
+  );
 
   /// 当前保持活动连接的对端节点。
   ///
@@ -120,6 +144,31 @@ final class EasyTierSession {
     ),
   );
 
+  /// 立即发送当前路由，随后只监听路由更新。
+  Stream<List<EasyTierRouteInfo>> get routeChanges => _currentAndUpdates(
+    routes,
+    _snapshotController.stream.map((snapshot) => snapshot.routes),
+  );
+
+  /// 立即发送当前底层连接，随后只监听连接更新。
+  Stream<List<EasyTierConnectionInfo>> get connectionChanges =>
+      _currentAndUpdates(
+        connections,
+        _snapshotController.stream.map((snapshot) => snapshot.connections),
+      );
+
+  /// 立即发送当前流量，随后只监听流量更新。
+  Stream<EasyTierTrafficInfo> get trafficChanges => _currentAndUpdates(
+    traffic,
+    _snapshotController.stream.map(
+      (snapshot) => EasyTierTrafficInfo(
+        totalReceivedBytes: snapshot.totalReceivedBytes,
+        totalTransmittedBytes: snapshot.totalTransmittedBytes,
+        peers: snapshot.peerTraffic,
+      ),
+    ),
+  );
+
   /// 立即发送当前连接信息，随后持续发送本机状态和节点变化。
   Stream<EasyTierConnectionOverview> get connectionInfoChanges =>
       _currentAndUpdates(connectionInfo, _connectionInfoController.stream);
@@ -150,6 +199,71 @@ final class EasyTierSession {
     await refresh();
     return connectionInfo;
   }
+
+  /// 等待当前组网进入运行状态并获得虚拟 IPv4。
+  ///
+  /// [timeout] 到期或会话提前失败时抛出 [EasyTierException]。超时不会停止
+  /// 会话，因为核心可能稍后恢复并完成连接。
+  Future<void> waitUntilReady({
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
+    bool isReady(EasyTierConnectionOverview info) {
+      final ipv4 = info.localNode.virtualIpv4;
+      return info.isRunning && ipv4.isNotEmpty && ipv4 != '0.0.0.0';
+    }
+
+    try {
+      await connectionInfoChanges
+          .map((info) {
+            if (info.status == EasyTierSessionStatus.failed) {
+              final failure = info.failure;
+              if (failure is EasyTierException) throw failure;
+              throw EasyTierException(
+                code: EasyTierErrorCode.coreStartFailed,
+                message: 'EasyTier 组网启动失败。',
+                technicalDetails: failure?.toString(),
+                recoverable: true,
+                cause: failure,
+              );
+            }
+            if (info.status == EasyTierSessionStatus.stopped) {
+              throw const EasyTierException(
+                code: EasyTierErrorCode.coreStartFailed,
+                message: 'EasyTier 组网在准备完成前已经停止。',
+                recoverable: true,
+              );
+            }
+            return info;
+          })
+          .firstWhere(isReady)
+          .timeout(timeout);
+    } on TimeoutException catch (error) {
+      final failure = EasyTierException(
+        code: EasyTierErrorCode.startupTimeout,
+        message: '等待 EasyTier 分配虚拟 IPv4 超时，请检查 peer、DHCP 和网络连接。',
+        technicalDetails: '等待时间：${timeout.inSeconds} 秒',
+        recoverable: true,
+        cause: error,
+      );
+      _onFailure(failure);
+      throw failure;
+    }
+  }
+
+  /// 使用 [config] 停止当前会话并启动一个新会话。
+  ///
+  /// 新配置会在停止当前会话前完成语法和语义校验。此操作不是热更新，调用方
+  /// 应保存返回的新 [EasyTierSession]。
+  Future<EasyTierSession> restartWith(
+    EasyTierConfig config, {
+    Duration timeout = const Duration(seconds: 20),
+  }) => _restart(this, config, timeout);
+
+  /// 使用完整 TOML 停止当前会话并启动一个新会话。
+  Future<EasyTierSession> restartWithToml(
+    String toml, {
+    Duration timeout = const Duration(seconds: 20),
+  }) => restartWith(EasyTierConfig.fromToml(toml), timeout: timeout);
 
   /// 停止当前网络。
   ///
@@ -197,7 +311,7 @@ final class EasyTierSession {
           EasyTierCoreEvent(json: message.json, receivedAt: DateTime.now()),
         );
       case 'stopped':
-        markStopped();
+        _handleEngineStopped();
     }
   }
 
@@ -224,6 +338,28 @@ final class EasyTierSession {
     _setStatus(EasyTierSessionStatus.failed, failure: failure);
   }
 
+  void _handleEngineStopped() {
+    if (_disposed) return;
+    if (_stopOperation != null ||
+        state.status == EasyTierSessionStatus.stopping) {
+      markStopped();
+      return;
+    }
+
+    if (state.status != EasyTierSessionStatus.failed) {
+      _setStatus(
+        EasyTierSessionStatus.failed,
+        failure: const EasyTierException(
+          code: EasyTierErrorCode.coreStoppedUnexpectedly,
+          message: 'EasyTier 核心意外停止，可能存在虚拟 IP、网卡或其他系统资源冲突。',
+          recoverable: true,
+        ),
+      );
+    }
+    unawaited(_watchSubscription.cancel());
+    _onStopped(this);
+  }
+
   void _setStatus(EasyTierSessionStatus status, {Object? failure}) {
     if (_disposed || state.status == status) return;
     final next = EasyTierSessionState(
@@ -234,6 +370,7 @@ final class EasyTierSession {
     _state.value = next;
     _stateController.add(next);
     _connectionInfoController.add(connectionInfo);
+    if (failure is EasyTierException) _onFailure(failure);
   }
 
   @internal

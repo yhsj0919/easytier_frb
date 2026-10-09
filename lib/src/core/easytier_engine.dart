@@ -14,6 +14,14 @@ abstract interface class EasyTierEngine {
 
   Future<void> validateToml(String toml);
 
+  bool configRequiresTun(String toml);
+
+  List<String> configListenerUrls(String toml);
+
+  String? configVirtualIpv4(String toml);
+
+  bool get hasTunPrivileges;
+
   Future<String> startFromToml(String toml, {bool forceNoTun = false});
 
   Future<void> setTunFd(String instanceId, int fd);
@@ -39,6 +47,19 @@ final class FrbEasyTierEngine implements EasyTierEngine {
 
   @override
   Future<void> validateToml(String toml) => rust.validateToml(toml: toml);
+
+  @override
+  bool configRequiresTun(String toml) => rust.configRequiresTun(toml: toml);
+
+  @override
+  List<String> configListenerUrls(String toml) =>
+      rust.configListenerUrls(toml: toml);
+
+  @override
+  String? configVirtualIpv4(String toml) => rust.configVirtualIpv4(toml: toml);
+
+  @override
+  bool get hasTunPrivileges => rust.hasTunPrivileges();
 
   @override
   Future<String> startFromToml(String toml, {bool forceNoTun = false}) =>

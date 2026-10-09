@@ -277,7 +277,25 @@ List<EasyTierOnlineNode> _onlineNodes(
       ),
     );
   }
+  nodes.sort((left, right) {
+    final byIpv4 = _ipv4SortKey(left.virtualIpv4)
+        .compareTo(_ipv4SortKey(right.virtualIpv4));
+    return byIpv4 != 0 ? byIpv4 : left.peerId.compareTo(right.peerId);
+  });
   return nodes;
+}
+
+int _ipv4SortKey(String value) {
+  if (value.isEmpty || value == '0.0.0.0') return 0x100000000;
+  final parts = value.split('.');
+  if (parts.length != 4) return 0x100000000;
+  var result = 0;
+  for (final part in parts) {
+    final octet = int.tryParse(part);
+    if (octet == null || octet < 0 || octet > 255) return 0x100000000;
+    result = result << 8 | octet;
+  }
+  return result;
 }
 
 int _prefixLength(String cidr) {
@@ -337,6 +355,7 @@ int _integer(Object? value) {
 }
 
 String _ipv4(Object? value) {
+  if (value == null) return '';
   final address = _integer(value);
   if (address < 0 || address > 0xffffffff) return '';
   return '${address >> 24 & 255}.${address >> 16 & 255}.'

@@ -27,6 +27,13 @@ easytier = { git = "https://github.com/EasyTier/EasyTier.git", rev = "8428a89d2d
     "zstd",
 ] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+] }
+
 [build-dependencies]
 cargo_metadata = "0.23"
 

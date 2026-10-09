@@ -216,6 +216,24 @@ final class EasyTierPeerTraffic {
   final int connectionCount;
 }
 
+/// 当前会话的流量汇总。
+final class EasyTierTrafficInfo {
+  const EasyTierTrafficInfo({
+    this.totalReceivedBytes = 0,
+    this.totalTransmittedBytes = 0,
+    this.peers = const [],
+  });
+
+  /// 全部连接累计接收的字节数。
+  final int totalReceivedBytes;
+
+  /// 全部连接累计发送的字节数。
+  final int totalTransmittedBytes;
+
+  /// 按对端节点汇总的流量。
+  final List<EasyTierPeerTraffic> peers;
+}
+
 /// 当前与本机会话保持活动连接的对端节点。
 ///
 /// 此类型只表示与本机直接建立隧道的邻居。展示整个网络的在线节点时，
