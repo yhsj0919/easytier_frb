@@ -302,9 +302,12 @@ final class EasyTier extends ChangeNotifier {
   }
 
   Future<void> _stopAll() async {
+    final active = _sessions.values.toList();
+    for (final session in active) {
+      session.markStopping();
+    }
     try {
       await _engine.stopAllInstances();
-      final active = _sessions.values.toList();
       for (final session in active) {
         session.markStopped();
       }
@@ -371,7 +374,20 @@ final class EasyTier extends ChangeNotifier {
     final cidr = configuredIpv4?.contains('/') == true
         ? configuredIpv4!
         : '$ipv4/24';
-    final fdReady = PlatformVpn.started
+    final fdReady = PlatformVpn.events
+        .where(
+          (event) =>
+              event['event'] == 'vpn_service_start' ||
+              event['event'] == 'vpn_service_error',
+        )
+        .map((event) {
+          final data = Map<String, dynamic>.from(event['data'] as Map);
+          if (data['configId']?.toString() == session.instanceId &&
+              event['event'] == 'vpn_service_error') {
+            throw StateError('Android VPN 创建失败：${data['message']}');
+          }
+          return data;
+        })
         .firstWhere(
           (data) => data['configId']?.toString() == session.instanceId,
         )

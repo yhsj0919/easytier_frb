@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:easytier_frb/easytier_frb.dart';
@@ -23,6 +24,8 @@ class _FakeEngine implements EasyTierEngine {
   List<String> listenerUrls = [];
   String? virtualIpv4;
   bool stopImmediately = false;
+  bool emitStoppedDuringStopAll = false;
+  final Map<String, StreamController<EngineSessionMessage>> watchers = {};
 
   @override
   bool configRequiresTun(String toml) => requiresTun;
@@ -65,6 +68,12 @@ class _FakeEngine implements EasyTierEngine {
   Future<void> stopAllInstances() async {
     stopAllCalls++;
     runningIds.clear();
+    for (final watcher in watchers.values) {
+      watcher.add(const EngineSessionMessage(kind: 'stopped', json: ''));
+    }
+    if (emitStoppedDuringStopAll) {
+      await Future<void>.delayed(Duration.zero);
+    }
   }
 
   @override
@@ -77,12 +86,20 @@ class _FakeEngine implements EasyTierEngine {
   Future<String> getSessionSnapshot(String instanceId) async => snapshotJson;
 
   @override
-  Stream<EngineSessionMessage> watchSession(String instanceId) =>
-      Stream.fromIterable([
-        EngineSessionMessage(kind: 'snapshot', json: snapshotJson),
-        if (stopImmediately)
-          const EngineSessionMessage(kind: 'stopped', json: ''),
-      ]);
+  Stream<EngineSessionMessage> watchSession(String instanceId) {
+    if (emitStoppedDuringStopAll) {
+      final watcher = StreamController<EngineSessionMessage>();
+      watchers[instanceId] = watcher;
+      watcher.add(EngineSessionMessage(kind: 'snapshot', json: snapshotJson));
+      watcher.onCancel = watcher.close;
+      return watcher.stream;
+    }
+    return Stream.fromIterable([
+      EngineSessionMessage(kind: 'snapshot', json: snapshotJson),
+      if (stopImmediately)
+        const EngineSessionMessage(kind: 'stopped', json: ''),
+    ]);
+  }
 }
 
 void main() {
@@ -667,6 +684,25 @@ no_tun = true
         () => easyTier.startToml('instance_name = "after-shutdown"'),
         throwsStateError,
       );
+    });
+
+    test('停止全部期间核心先返回停止事件也不会报告意外退出', () async {
+      engine.emitStoppedDuringStopAll = true;
+      final first = await easyTier.startToml('instance_name = "first"');
+      final second = await easyTier.startToml('instance_name = "second"');
+      await Future<void>.delayed(Duration.zero);
+      final errors = <EasyTierException>[];
+      final subscription = easyTier.errorChanges.listen(errors.add);
+
+      await easyTier.stopAll();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(first.state.status, EasyTierSessionStatus.stopped);
+      expect(second.state.status, EasyTierSessionStatus.stopped);
+      expect(easyTier.sessions, isEmpty);
+      expect(easyTier.lastError, isNull);
+      expect(errors, isEmpty);
+      await subscription.cancel();
     });
 
     test('受控重启会停止旧会话并返回已经就绪的新会话', () async {

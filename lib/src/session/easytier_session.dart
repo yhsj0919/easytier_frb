@@ -374,6 +374,11 @@ final class EasyTierSession {
   }
 
   @internal
+  void markStopping() {
+    _setStatus(EasyTierSessionStatus.stopping);
+  }
+
+  @internal
   void markStopped() {
     if (state.status != EasyTierSessionStatus.stopped) {
       _setStatus(EasyTierSessionStatus.stopped);

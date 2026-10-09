@@ -5,6 +5,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
+import java.net.InetAddress
 
 /** 瘦 VpnService：仅建立 TUN 并通过 EventChannel 回传 fd，不运行 Rust。 */
 class EasytierVpnService : VpnService() {
@@ -28,7 +29,16 @@ class EasytierVpnService : VpnService() {
         val args = intent?.extras
         configId = args?.getString(CONFIG_ID)
 
-        vpnInterface = createVpnInterface(args)
+        try {
+            vpnInterface = createVpnInterface(args)
+        } catch (error: Exception) {
+            triggerCallback(
+                "vpn_service_error",
+                mapOf("configId" to configId, "message" to (error.message ?: "VPN 创建失败")),
+            )
+            stopSelf()
+            return START_NOT_STICKY
+        }
         triggerCallback(
             "vpn_service_start",
             mapOf(
@@ -76,11 +86,7 @@ class EasytierVpnService : VpnService() {
             throw IllegalArgumentException("Invalid IPv4 addr: $ipv4Addr")
         }
 
-        val octets = ipParts[0].split(".")
-        if (octets.size != 4) {
-            throw IllegalArgumentException("Invalid IPv4 address: ${ipParts[0]}")
-        }
-        val networkCidr = "${octets[0]}.${octets[1]}.${octets[2]}.0/${ipParts[1]}"
+        val networkCidr = "${networkAddress(ipParts[0], ipParts[1].toInt())}/${ipParts[1]}"
 
         var routes = mutableListOf(
             networkCidr,
@@ -104,7 +110,8 @@ class EasytierVpnService : VpnService() {
             if (routeParts.size != 2) {
                 throw IllegalArgumentException("Invalid route: $route")
             }
-            builder.addRoute(routeParts[0], routeParts[1].toInt())
+            val prefix = routeParts[1].toInt()
+            builder.addRoute(networkAddress(routeParts[0], prefix), prefix)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -113,6 +120,18 @@ class EasytierVpnService : VpnService() {
 
         return builder.establish()
             ?: throw IllegalStateException("Failed to establish VpnService")
+    }
+
+    /** 按掩码清除主机位，兼容 /16、/24、/32 等网段。 */
+    private fun networkAddress(address: String, prefix: Int): String {
+        val bytes = InetAddress.getByName(address).address
+        require(prefix in 0..bytes.size * 8) { "无效的路由掩码：$prefix" }
+        for (index in bytes.indices) {
+            val bits = (prefix - index * 8).coerceIn(0, 8)
+            val mask = (0xff shl (8 - bits)) and 0xff
+            bytes[index] = (bytes[index].toInt() and mask).toByte()
+        }
+        return InetAddress.getByAddress(bytes).hostAddress!!
     }
 }
 
