@@ -8,7 +8,22 @@
 
 流程仅手动触发，不发布 Release，不需要配置签名证书。第一次 Rust 编译较慢，后续运行会复用缓存。GitHub 构建通过只表示成功生成应用，不代表真机连接已验证。
 
-## 在 Mac 上运行
+## GitHub 自动入网测试
+
+在仓库 Settings → Secrets and variables → Actions 中新增仓库 Secret
+`MACOS_TEST_TOML`，值为你提供的完整 TOML 配置（`instance_name = "mac_test"`、
+DHCP、空 listeners、网络身份和 peer）。不要额外添加 `hostname` 或 `[flags]`，
+测试会自动设置主机名 `mac_test` 和 `no_tun = true`。
+
+Run workflow 时勾选 `network_test`。构建完成后测试会启动真实内嵌核心，等待
+DHCP IP 和至少一条活动连接，然后保持在线 5 分钟。看到日志“mac_test 已入网”
+后，可在你的本地客户端查看该节点。测试结束会停止核心，节点会离线。
+
+这个测试验证 GitHub macOS 环境下的核心入网和节点发现，不创建 TUN，不能
+用本机 ping 虚拟 IP 的结果判断此测试成败。TUN、虚拟 IP 通信和下载后的权限
+流程仍按下面步骤在真实 Mac 上验证。取消 Action 或超时后 runner 也会结束。
+
+## 在 Mac 上运行测试包
 
 这是未做 Developer ID 签名和公证的自用测试包。Demo 已关闭 App Sandbox，以便测试内嵌核心直接创建 TUN。该方式不作为 App Store 分发方案。
 

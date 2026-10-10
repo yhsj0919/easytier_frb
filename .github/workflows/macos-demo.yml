@@ -3,6 +3,11 @@ name: macOS Demo 打包
 on:
   workflow_dispatch:
     inputs:
+      network_test:
+        description: 执行真实入网测试并保持在线 5 分钟（需 MACOS_TEST_TOML Secret）
+        required: false
+        default: false
+        type: boolean
       flutter_version:
         description: Flutter 版本（留空使用 stable；须满足 pubspec 的 Dart 版本要求）
         required: false
@@ -63,6 +68,19 @@ jobs:
       - name: 构建 macOS 测试应用
         working-directory: example
         run: flutter build macos --release
+
+      - name: 真实入网测试（无 TUN）
+        if: ${{ inputs.network_test }}
+        working-directory: example
+        shell: bash
+        env:
+          MACOS_TEST_TOML: ${{ secrets.MACOS_TEST_TOML }}
+        run: |
+          test -n "$MACOS_TEST_TOML" || { echo '请先设置 MACOS_TEST_TOML Secret'; exit 1; }
+          config_file="$RUNNER_TEMP/macos-network-test.json"
+          trap 'rm -f "$config_file"' EXIT
+          jq -n '{MACOS_TEST_TOML: env.MACOS_TEST_TOML}' > "$config_file"
+          flutter drive --driver=../test_driver/integration_test.dart --target=integration_test/macos_network_test.dart -d macos --dart-define-from-file="$config_file"
 
       - name: 检查架构并压缩应用
         shell: bash
