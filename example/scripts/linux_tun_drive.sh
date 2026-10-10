@@ -2,9 +2,11 @@
 set -euo pipefail
 
 log_file="$RUNNER_TEMP/linux-tun-app.log"
-sudo --preserve-env=DISPLAY,XAUTHORITY,LINUX_TEST_ADB_TARGET build/linux/x64/debug/bundle/easytier_frb_example > "$log_file" 2>&1 &
+# 为本次测试使用独立 ADB 服务，不影响默认的 5037 服务。
+export ADB_SERVER_SOCKET=tcp:127.0.0.1:15037
+sudo --preserve-env=DISPLAY,XAUTHORITY,LINUX_TEST_ADB_TARGET,ADB_SERVER_SOCKET build/linux/x64/debug/bundle/easytier_frb_example > "$log_file" 2>&1 &
 app_pid=$!
-trap 'sudo kill "$app_pid" 2>/dev/null || true; cat "$log_file"' EXIT
+trap 'sudo --preserve-env=ADB_SERVER_SOCKET adb kill-server >/dev/null 2>&1 || true; sudo kill "$app_pid" 2>/dev/null || true; cat "$log_file"' EXIT
 
 # 等待 Debug 应用输出 VM Service 地址，再让普通权限的测试驱动连接。
 vm_url=''

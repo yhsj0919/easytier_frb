@@ -25,8 +25,11 @@ void main() {
       final rawToml = utf8.decode(
         base64Decode(const String.fromEnvironment('LINUX_TEST_TOML_BASE64')),
       );
-      final easyTier = await EasyTier.initialize();
+      // 提前启动，避免 ADB 后台进程继承随后创建的 TUN 文件描述符。
+      await _adb(['start-server']);
+      EasyTier? easyTier;
       try {
+        easyTier = await EasyTier.initialize();
         final session = await easyTier.startToml(
           'hostname = "linux_tun_test"\n$rawToml\n[flags]\nno_tun = false\n',
         );
@@ -72,19 +75,34 @@ void main() {
         } finally {
           await _adb(['disconnect', target]);
         }
+        await _adb(['kill-server']);
         await session.stop();
-        final remaining = await NetworkInterface.list(
-          type: InternetAddressType.IPv4,
-        );
-        expect(
-          remaining
-              .expand((item) => item.addresses)
-              .any((address) => address.address == virtualIp),
-          isFalse,
-        );
+        // 上游运行时在后台释放任务，检查最终清理结果，不要求瞬间消失。
+        final cleanupDeadline = DateTime.now().add(const Duration(seconds: 5));
+        while (true) {
+          final remaining = await NetworkInterface.list(
+            type: InternetAddressType.IPv4,
+          );
+          final stillPresent = remaining.any(
+            (item) =>
+                item.name == tun.name &&
+                item.addresses.any((address) => address.address == virtualIp),
+          );
+          if (!stillPresent) break;
+          expect(
+            DateTime.now().isBefore(cleanupDeadline),
+            isTrue,
+            reason: '停止后 5 秒，本次 TUN 的虚拟 IP 仍未清理',
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
         debugPrint('TUN 停止和网卡清理通过。');
       } finally {
-        await easyTier.shutdown();
+        try {
+          await _adb(['kill-server']);
+        } finally {
+          await easyTier?.shutdown();
+        }
       }
     });
   }, timeout: const Timeout(Duration(minutes: 5)));
