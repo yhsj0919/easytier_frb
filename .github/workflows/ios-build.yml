@@ -1,0 +1,110 @@
+name: iOS 编译与打包
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 真机未签名包，或模拟器编译检查
+        type: choice
+        options: [device, simulator]
+        default: device
+      flutter_version:
+        description: Flutter 版本（留空使用 stable）
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      CARGOKIT_CI_TARGET_DIR: ${{ github.workspace }}/.ci-rust/ios-${{ inputs.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ inputs.flutter_version }}
+          cache: true
+      - name: 安装编译依赖
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+          brew list protobuf >/dev/null 2>&1 || brew install protobuf
+          echo "PROTOC=$(command -v protoc)" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV"
+          pod --version
+      - name: 生成工具链标识
+        id: toolchain
+        run: |
+          identity=$( { rustc -Vv; xcodebuild -version; flutter --version; protoc --version; } | shasum -a 256 | awk '{print $1}')
+          echo "id=$identity" >> "$GITHUB_OUTPUT"
+      - name: 恢复 Rust 缓存
+        id: rust-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .ci-rust/ios-${{ inputs.target }}
+          key: ios-v1-${{ inputs.target }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml', 'rust/src/**', 'rust/build.rs') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ios-v1-${{ inputs.target }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml', 'rust/src/**', 'rust/build.rs') }}-
+            ios-v1-${{ inputs.target }}-${{ steps.toolchain.outputs.id }}-
+      - name: 配置 VPN 扩展模板
+        run: |
+          # 不依赖 CocoaPods 的 Ruby 是否与系统 Ruby 共用 gem 目录。
+          gem install xcodeproj -v 1.27.0 --no-document --install-dir "$RUNNER_TEMP/ios-ruby-gems"
+          ruby -c example/ios/setup_tunnel.rb
+          GEM_PATH="$RUNNER_TEMP/ios-ruby-gems" ruby example/ios/setup_tunnel.rb
+      - name: 编译真机 Release 应用和扩展（不签名）
+        if: inputs.target == 'device'
+        working-directory: example
+        run: |
+          flutter pub get
+          flutter build ios --release --no-codesign
+      - name: 编译模拟器应用和扩展
+        if: inputs.target == 'simulator'
+        working-directory: example
+        run: |
+          flutter pub get
+          flutter build ios --debug --simulator --no-codesign
+      - name: 检查扩展并打包
+        env:
+          BUILD_TARGET: ${{ inputs.target }}
+        run: |
+          mkdir -p dist
+          if [ "$BUILD_TARGET" = device ]; then
+            app=example/build/ios/iphoneos/Runner.app
+            test -d "$app/PlugIns/EasyTierTunnel.appex"
+            lipo "$app/Runner" -verify_arch arm64
+            mkdir -p "$RUNNER_TEMP/ios-package/Payload"
+            ditto "$app" "$RUNNER_TEMP/ios-package/Payload/Runner.app"
+            (cd "$RUNNER_TEMP/ios-package" && zip -qry "$GITHUB_WORKSPACE/dist/easytier-demo-ios-unsigned.ipa" Payload)
+          else
+            app=example/build/ios/iphonesimulator/Runner.app
+            test -d "$app/PlugIns/EasyTierTunnel.appex"
+            ditto -c -k --sequesterRsrc --keepParent "$app" dist/easytier-demo-ios-simulator.zip
+          fi
+          cp docs/IOS_BUILD.md dist/说明.md
+          find dist -type f \( -name '*.ipa' -o -name '*.zip' \) -exec shasum -a 256 {} \; > dist/SHA256SUMS.txt
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: easytier-demo-ios-${{ inputs.target }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+      - name: 保存 Rust 缓存（失败时也保存）
+        if: ${{ !cancelled() && steps.rust-cache.outcome == 'success' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .ci-rust/ios-${{ inputs.target }}
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
