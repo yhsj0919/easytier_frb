@@ -1,0 +1,99 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:easytier_frb/easytier_frb.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+
+void main() {
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('Linux TUN 和 ADB 连接', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: Text('linux_tun_test')));
+    await tester.runAsync(() async {
+      expect(Platform.isLinux, isTrue);
+      final target = Platform.environment['LINUX_TEST_ADB_TARGET'] ?? '';
+      final parts = target.split(':');
+      if (parts.length != 2 ||
+          InternetAddress.tryParse(parts.first)?.type !=
+              InternetAddressType.IPv4 ||
+          (int.tryParse(parts.last) ?? 0) < 1 ||
+          (int.tryParse(parts.last) ?? 0) > 65535) {
+        throw StateError('ADB Secret 格式应为虚拟 IPv4:端口');
+      }
+      final targetIp = parts.first;
+      final rawToml = utf8.decode(
+        base64Decode(const String.fromEnvironment('LINUX_TEST_TOML_BASE64')),
+      );
+      final easyTier = await EasyTier.initialize();
+      try {
+        final session = await easyTier.startToml(
+          'hostname = "linux_tun_test"\n$rawToml\n[flags]\nno_tun = false\n',
+        );
+        await session.waitUntilReady(timeout: const Duration(seconds: 60));
+        final virtualIp = session.virtualIpv4;
+        final interfaces = await NetworkInterface.list(
+          type: InternetAddressType.IPv4,
+        );
+        final tun = interfaces.singleWhere(
+          (item) =>
+              item.addresses.any((address) => address.address == virtualIp),
+        );
+        debugPrint('TUN 已创建：${tun.name}，IP：$virtualIp');
+        final deadline = DateTime.now().add(const Duration(seconds: 60));
+        while (!session.connections.any((item) => !item.isClosed)) {
+          expect(DateTime.now().isBefore(deadline), isTrue, reason: '等待节点连接超时');
+          await Future<void>.delayed(const Duration(seconds: 1));
+          await session.refresh();
+        }
+        final route = await Process.run('ip', ['route', 'get', targetIp]);
+        expect(route.exitCode, 0);
+        expect(
+          route.stdout.toString().contains('dev ${tun.name} '),
+          isTrue,
+          reason: '目标未经过本次 TUN',
+        );
+        // 不输出 ADB 原始信息，避免其中的目标地址出现在日志中。
+        await _adb(['connect', target]);
+        try {
+          final state = await _adb(['-s', target, 'get-state']);
+          expect(state.trim(), 'device', reason: 'ADB 未连接或设备尚未授权');
+          final model = await _adb([
+            '-s',
+            target,
+            'shell',
+            'getprop',
+            'ro.product.model',
+          ]);
+          expect(model.trim().isNotEmpty, isTrue, reason: '未获取到设备型号');
+          debugPrint(
+            'ADB 连接成功，设备名称：${model.trim().replaceAll(target, '[隐藏]').replaceAll(targetIp, '[隐藏]')}',
+          );
+        } finally {
+          await _adb(['disconnect', target]);
+        }
+        await session.stop();
+        final remaining = await NetworkInterface.list(
+          type: InternetAddressType.IPv4,
+        );
+        expect(
+          remaining
+              .expand((item) => item.addresses)
+              .any((address) => address.address == virtualIp),
+          isFalse,
+        );
+        debugPrint('TUN 停止和网卡清理通过。');
+      } finally {
+        await easyTier.shutdown();
+      }
+    });
+  }, timeout: const Timeout(Duration(minutes: 5)));
+}
+
+Future<String> _adb(List<String> arguments) async {
+  final result = await Process.run('timeout', ['20s', 'adb', ...arguments]);
+  if (result.exitCode != 0) {
+    throw StateError('ADB 操作失败或超时，请检查服务和设备授权');
+  }
+  return result.stdout.toString();
+}
