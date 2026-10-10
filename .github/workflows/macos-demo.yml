@@ -109,7 +109,7 @@ jobs:
           trap 'rm -f "$config_file"' EXIT
           jq -n '{MACOS_TEST_TOML_BASE64: (env.MACOS_TEST_TOML | @base64)}' > "$config_file"
           echo "::add-mask::$(jq -r '.MACOS_TEST_TOML_BASE64' "$config_file")"
-          flutter drive --driver=../test_driver/integration_test.dart --target=integration_test/macos_network_test.dart -d macos --dart-define-from-file="$config_file"
+          flutter drive --driver=test_driver/integration_test.dart --target=integration_test/macos_network_test.dart -d macos --dart-define-from-file="$config_file"
       - name: 保存 Rust 缓存（失败时也保存）
         if: ${{ !cancelled() && steps.rust-cache.outcome == 'success' }}
         uses: actions/cache/save@v4

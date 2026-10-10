@@ -65,7 +65,7 @@ jobs:
           trap 'rm -f "$config_file"' EXIT
           jq -n '{LINUX_TEST_TOML_BASE64: (env.LINUX_TEST_TOML | @base64)}' > "$config_file"
           echo "::add-mask::$(jq -r '.LINUX_TEST_TOML_BASE64' "$config_file")"
-          xvfb-run -a flutter drive --driver=../test_driver/integration_test.dart --target=integration_test/linux_network_test.dart -d linux --dart-define-from-file="$config_file"
+          xvfb-run -a flutter drive --driver=test_driver/integration_test.dart --target=integration_test/linux_network_test.dart -d linux --dart-define-from-file="$config_file"
       - name: 保存 Rust 缓存（失败时也保存）
         if: ${{ !cancelled() && steps.rust-cache.outcome == 'success' }}
         uses: actions/cache/save@v4
