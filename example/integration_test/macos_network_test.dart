@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:easytier_frb/easytier_frb.dart';
@@ -14,8 +15,9 @@ void main() {
     );
     await tester.runAsync(() async {
       expect(Platform.isMacOS, isTrue);
-      const rawToml = String.fromEnvironment('MACOS_TEST_TOML');
-      expect(rawToml.trim(), isNotEmpty, reason: '需要配置 MACOS_TEST_TOML');
+      const encodedToml = String.fromEnvironment('MACOS_TEST_TOML_BASE64');
+      expect(encodedToml, isNotEmpty, reason: '需要配置 MACOS_TEST_TOML');
+      final rawToml = utf8.decode(base64Decode(encodedToml));
 
       // 测试配置没有 flags 表；无 TUN 只验证核心入网，不需要管理员权限。
       final toml = 'hostname = "mac_test"\n$rawToml\n[flags]\nno_tun = true\n';
