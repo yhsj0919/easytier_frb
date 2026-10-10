@@ -21,6 +21,8 @@ Embed the EasyTier Rust core in Flutter applications.
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*'
   s.dependency 'FlutterMacOS'
+  # Rust 静态库的 system-configuration 依赖需要宿主链接系统网络框架。
+  s.frameworks = 'SystemConfiguration'
 
   s.platform = :osx, '10.11'
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
@@ -40,6 +42,6 @@ Embed the EasyTier Rust core in Flutter applications.
     'DEFINES_MODULE' => 'YES',
     # Flutter.framework does not contain a i386 slice.
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
-    'OTHER_LDFLAGS' => '-force_load ${PODS_CONFIGURATION_BUILD_DIR}/rust_lib_easytier_frb/librust_lib_easytier_frb.a',
+    'OTHER_LDFLAGS' => '$(inherited) -force_load ${PODS_CONFIGURATION_BUILD_DIR}/rust_lib_easytier_frb/librust_lib_easytier_frb.a',
   }
 end
