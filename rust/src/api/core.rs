@@ -13,6 +13,11 @@ pub(crate) fn instance_manager() -> &'static NetworkInstanceManager {
     &MANAGER
 }
 
+#[cfg(target_os = "ios")]
+pub(crate) fn core_runtime() -> &'static Runtime {
+    &RUNTIME
+}
+
 pub(crate) fn parse_core_instance_id(instance_id: &str) -> Result<Uuid, String> {
     parse_instance_id(instance_id)
 }

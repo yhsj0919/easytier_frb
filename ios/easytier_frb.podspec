@@ -22,7 +22,7 @@ Embed the EasyTier Rust core in Flutter applications.
   s.source_files = 'Classes/**/*'
   s.dependency 'Flutter'
   # Rust 的系统网络配置依赖需要链接此框架。
-  s.frameworks = 'SystemConfiguration'
+  s.frameworks = 'SystemConfiguration', 'NetworkExtension'
   s.platform = :ios, '15.0'
 
   # Flutter.framework does not contain a i386 slice.

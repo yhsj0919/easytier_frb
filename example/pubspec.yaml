@@ -1,6 +1,7 @@
 name: easytier_frb_example
 description: "演示 easytier_frb 插件的使用方法。"
 publish_to: 'none'
+version: 1.0.0+1
 
 environment:
   sdk: ^3.13.3

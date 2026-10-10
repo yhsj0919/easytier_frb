@@ -27,6 +27,7 @@ flutter:
         pluginClass: EasytierFrbPlugin
         ffiPlugin: true
       ios:
+        pluginClass: EasytierFrbPlugin
         ffiPlugin: true
       linux:
         ffiPlugin: true

@@ -61,6 +61,13 @@ jobs:
           gem install xcodeproj -v 1.27.0 --no-document --install-dir "$RUNNER_TEMP/ios-ruby-gems"
           ruby -c example/ios/setup_tunnel.rb
           GEM_PATH="$RUNNER_TEMP/ios-ruby-gems" ruby example/ios/setup_tunnel.rb
+          # 构建前确认 Xcode 实际解析的名称，避免重复等待编译才发现输出错误。
+          xcodebuild -project example/ios/Runner.xcodeproj -target EasyTierTunnel -configuration Release -showBuildSettings > "$RUNNER_TEMP/ios-tunnel-settings.txt"
+          grep -E '^[[:space:]]*FULL_PRODUCT_NAME = EasyTierTunnel\.appex$' "$RUNNER_TEMP/ios-tunnel-settings.txt"
+      - name: 检查 IPv6 和 DNS 设置逻辑
+        run: |
+          swiftc example/ios/EasyTierTunnel/TunnelAddress.swift example/ios/tests/main.swift -o "$RUNNER_TEMP/ios-settings-check"
+          "$RUNNER_TEMP/ios-settings-check"
       - name: 编译真机 Release 应用和扩展（不签名）
         if: inputs.target == 'device'
         working-directory: example
@@ -82,6 +89,7 @@ jobs:
             app=example/build/ios/iphoneos/Runner.app
             test -d "$app/PlugIns/EasyTierTunnel.appex"
             lipo "$app/Runner" -verify_arch arm64
+            lipo "$app/PlugIns/EasyTierTunnel.appex/EasyTierTunnel" -verify_arch arm64
             mkdir -p "$RUNNER_TEMP/ios-package/Payload"
             ditto "$app" "$RUNNER_TEMP/ios-package/Payload/Runner.app"
             (cd "$RUNNER_TEMP/ios-package" && zip -qry "$GITHUB_WORKSPACE/dist/easytier-demo-ios-unsigned.ipa" Payload)

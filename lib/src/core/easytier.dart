@@ -29,7 +29,15 @@ final class EasyTier extends ChangeNotifier {
       _nativeInitialization = null;
       rethrow;
     }
-    final easyTier = EasyTier._(const FrbEasyTierEngine());
+    final EasyTierEngine engine;
+    if (Platform.isIOS) {
+      final iosEngine = IosEasyTierEngine();
+      await iosEngine.restore();
+      engine = iosEngine;
+    } else {
+      engine = const FrbEasyTierEngine();
+    }
+    final easyTier = EasyTier._(engine);
     await easyTier.restoreRunningSessions();
     return easyTier;
   }
