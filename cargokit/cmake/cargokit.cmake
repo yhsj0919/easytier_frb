@@ -26,6 +26,10 @@ function(apply_cargokit target manifest_dir lib_name any_symbol_name)
         set(OUTPUT_LIB "${CMAKE_CURRENT_BINARY_DIR}/${CARGOKIT_LIB_FULL_NAME}")
     endif()
     set(CARGOKIT_TEMP_DIR "${CMAKE_CURRENT_BINARY_DIR}/cargokit_build")
+    # CI 使用固定目录缓存 Rust 编译结果，本地仍保留原来的构建路径。
+    if(DEFINED ENV{CARGOKIT_CI_TARGET_DIR} AND NOT "$ENV{CARGOKIT_CI_TARGET_DIR}" STREQUAL "")
+        set(CARGOKIT_TEMP_DIR "$ENV{CARGOKIT_CI_TARGET_DIR}")
+    endif()
 
     if (FLUTTER_TARGET_PLATFORM)
         set(CARGOKIT_TARGET_PLATFORM "${FLUTTER_TARGET_PLATFORM}")

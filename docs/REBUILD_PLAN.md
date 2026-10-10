@@ -645,7 +645,8 @@ EasyTier 当前使用 LGPL-3.0。新项目开始时必须完成：
 - [x] Windows 插件节点主动访问官方 EasyTier 客户端。
 - [x] 官方 EasyTier 客户端反向访问 Windows 插件节点。
 - [x] Windows 权限不足的明确诊断和提示。
-- [ ] Linux、macOS 直接 TUN 真机验证。
+- [x] macOS 直接 TUN 真机验证及 TCP 通信。
+- [ ] Linux 直接 TUN 真机验证。
 - [x] Windows 多网络并行，各子网可 ping 通，单会话停止或重启不影响其他会话。
 - [ ] Linux、macOS 多网络并行验证。
 - [ ] 资源清理和异常退出恢复。

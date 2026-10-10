@@ -1,0 +1,77 @@
+name: Linux 组网测试
+
+on:
+  workflow_dispatch:
+    inputs:
+      flutter_version:
+        description: Flutter 版本（留空使用 stable）
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  network-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGOKIT_CI_TARGET_DIR: ${{ github.workspace }}/.ci-rust/linux-network
+    steps:
+      - uses: actions/checkout@v4
+      - name: 检查测试配置
+        env:
+          LINUX_TEST_TOML: ${{ secrets.LINUX_TEST_TOML }}
+        run: test -n "$LINUX_TEST_TOML" || { echo '请先设置 LINUX_TEST_TOML Secret'; exit 1; }
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ inputs.flutter_version }}
+          cache: true
+      - name: 安装 Linux 构建和虚拟显示依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev protobuf-compiler libclang-dev xvfb xauth
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          echo "PROTOC=$(command -v protoc)" >> "$GITHUB_ENV"
+      - name: 生成工具链标识
+        id: toolchain
+        run: |
+          identity=$( { rustc -Vv; clang --version; flutter --version; protoc --version; } | sha256sum | awk '{print $1}')
+          echo "id=$identity" >> "$GITHUB_OUTPUT"
+      - name: 恢复 Rust 编译缓存
+        id: rust-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .ci-rust/linux-network
+          key: linux-network-v1-${{ steps.toolchain.outputs.id }}-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml', 'rust/src/**', 'rust/build.rs') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            linux-network-v1-${{ steps.toolchain.outputs.id }}-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml', 'rust/src/**', 'rust/build.rs') }}-
+            linux-network-v1-${{ steps.toolchain.outputs.id }}-
+      - name: 获取 Flutter 依赖
+        working-directory: example
+        run: flutter pub get
+      - name: 真实入网和 HTTP 测试（无 TUN）
+        working-directory: example
+        env:
+          LINUX_TEST_TOML: ${{ secrets.LINUX_TEST_TOML }}
+        run: |
+          config_file="$RUNNER_TEMP/linux-network-test.json"
+          trap 'rm -f "$config_file"' EXIT
+          jq -n '{LINUX_TEST_TOML_BASE64: (env.LINUX_TEST_TOML | @base64)}' > "$config_file"
+          echo "::add-mask::$(jq -r '.LINUX_TEST_TOML_BASE64' "$config_file")"
+          xvfb-run -a flutter drive --driver=../test_driver/integration_test.dart --target=integration_test/linux_network_test.dart -d linux --dart-define-from-file="$config_file"
+      - name: 保存 Rust 缓存（失败时也保存）
+        if: ${{ !cancelled() && steps.rust-cache.outcome == 'success' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .ci-rust/linux-network
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}

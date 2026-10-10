@@ -82,6 +82,9 @@ jobs:
           app="example/build/macos/Build/Products/Release/easytier_frb_example.app"
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent "$app" dist/easytier-demo-macos-universal.zip
+          # 单独编译启动器，不重新编译 Flutter 或 Rust。
+          osacompile -o "$RUNNER_TEMP/启动 EasyTier Demo.app" example/macos/launch_admin.applescript
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/启动 EasyTier Demo.app" dist/easytier-demo-macos-admin-launcher.zip
           cp docs/MACOS_TEST.md dist/测试说明.md
           shasum -a 256 dist/easytier-demo-macos-universal.zip > dist/SHA256SUMS.txt
       - name: 上传测试包（检查失败也保留）

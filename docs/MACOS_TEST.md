@@ -42,6 +42,11 @@ TUN、系统应用的虚拟 IP 通信和下载后的权限
 
 ## 在 Mac 上运行测试包
 
+推荐使用随包附带的提权启动图标，具体过程见 [Demo 提权流程](MACOS_ADMIN.md)。
+解压 `easytier-demo-macos-admin-launcher.zip`，将“启动 EasyTier Demo.app”与
+`easytier_frb_example.app` 放在同一目录。双击启动器，输入管理员密码即可启动。
+首次使用需要分别允许系统打开这两个未公证的测试应用。
+
 这是未做 Developer ID 签名和公证的自用测试包。Demo 已关闭 App Sandbox，以便测试内嵌核心直接创建 TUN。该方式不作为 App Store 分发方案。
 
 将应用放到自己选定的位置，例如 `~/Downloads/easytier_frb_example.app`。如果系统拦截，按系统提示在“系统设置 → 隐私与安全性”中允许打开。仅对你自己构建并确认来源的测试应用，可移除其下载隔离属性：

@@ -12,7 +12,7 @@
 - 支持在同一进程中并行运行多个 EasyTier 会话。
 - 支持监听会话生命周期、运行快照、核心事件、路由、连接和流量统计。
 - 仅支持原生平台，不支持 Web。
-- Windows 原生集成已经验证。Android 已完成真机启动、后台连接保持、页面恢复和防重复启动验证；iOS、macOS、Linux 和 OpenHarmony 仍需在对应设备或主机上验证。
+- Windows 原生集成已经验证。Android 已完成真机启动、后台连接保持、页面恢复和防重复启动验证。macOS 已完成真实 Mac TUN 组网及 TCP 通信验证；iOS、Linux 和 OpenHarmony 仍需在对应设备或主机上验证。
 
 ## 使用方法
 
@@ -169,7 +169,7 @@ Windows 使用 TUN 模式时，插件会在启动核心前检查管理员权限�
 | Windows | 已完成 | 已完成：权限预检、管理员模式、TUN、DHCP、与官方客户端通信、多组网并行及单会话停止/重启隔离 |
 | Android | 已完成 | 已完成：连接、停止、重启、后台保持、页面恢复、防重复启动、路由掩码修复后的启动 |
 | iOS | 已完成 | 待 Apple 主机和设备验证 |
-| macOS | 已完成 | 待 Apple 主机验证 |
+| macOS | 已完成 | 已验证：构建、云端入网/P2P、真实 Mac 管理员启动、TUN 组网和 TCP 通信 |
 | Linux | 已完成 | 待 Linux 主机验证 |
 | OpenHarmony | 已创建工程骨架 | 待接入 OHOS 工具链 |
 | Web | 未接入 | 不支持 |
@@ -177,6 +177,8 @@ Windows 使用 TUN 模式时，插件会在启动核心前检查管理员权限�
 完整的新手 API 指南见 [docs/API.md](docs/API.md)。原生构建说明见 [docs/BUILD.md](docs/BUILD.md)，范围和设计决策见 [docs/REBUILD_PLAN.md](docs/REBUILD_PLAN.md)。
 
 Windows 和 Android 的实测结果及待测项目见 [docs/TESTING.md](docs/TESTING.md)。
+
+Linux 云端入网与 HTTP 测试流程见 [docs/LINUX_TEST.md](docs/LINUX_TEST.md)。
 
 ## 开发检查
 
