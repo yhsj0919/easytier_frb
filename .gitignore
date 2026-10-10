@@ -31,3 +31,5 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 /build/
 /coverage/
+# GitHub Actions 专用 Rust 编译缓存。
+/.ci-rust/

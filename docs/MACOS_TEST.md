@@ -2,11 +2,15 @@
 
 ## GitHub 打包
 
-将代码推送到 GitHub 默认分支，在 Actions 中选择“macOS Demo 打包”，点击 Run workflow。默认使用 Flutter stable，可以填写具体 Flutter 版本；其 Dart 版本必须满足当前 `pubspec.yaml` 的 `^3.13.3` 要求。如果 stable 暂不满足，请选择满足要求的 Flutter 版本后重试，不要直接降低项目 SDK 要求。
+将代码推送到 GitHub 默认分支，在 Actions 中选择“macOS 构建与测试”，点击 Run workflow。`mode` 选择 `package` 只打包，`network-test` 只做入网测试，`both` 分成两个独立任务。默认只测试，避免重复编译 Release 双架构包和 Debug 测试应用。
 
-完成后下载 `easytier-demo-macos-universal` artifact，解开外层压缩包，再解开其中的 `easytier-demo-macos-universal.zip`。应用同时包含 Intel 和 Apple Silicon 架构。构建过程会检查两种架构是否齐全，缺失时直接失败。
+默认使用 Flutter stable，可以填写具体 Flutter 版本；其 Dart 版本必须满足当前 `pubspec.yaml` 的 `^3.13.3` 要求。
 
-流程仅手动触发，不发布 Release，不需要配置签名证书。第一次 Rust 编译较慢，后续运行会复用缓存。GitHub 构建通过只表示成功生成应用，不代表真机连接已验证。
+打包完成后下载 `easytier-demo-macos-universal` artifact，解开外层压缩包，再解开其中的 `easytier-demo-macos-universal.zip`。应用上传后再检查双架构，即使架构检查失败也能下载产物；此时不要将其视为已验证的双架构包。
+
+流程仅手动触发，不发布 Release，不需要配置签名证书。Rust 使用固定缓存目录，按任务、工具链、Rust 代码区分；后续步骤失败时也保存缓存。首次建立新缓存、工具链升级或缓存被 GitHub 清理后仍需要重新编译。普通打包不重复执行全部 Dart 单元测试。
+
+选择 `both` 后可以使用 GitHub 的 Re-run failed jobs 只重跑失败任务。修改 workflow 必须推送后重新 Run workflow，重跑旧记录不会读取新代码。当前流程复用 Rust 编译结果，仍会执行 Flutter 构建；上传的 ZIP 保存 14 天。
 
 ## GitHub 自动入网测试
 
@@ -15,12 +19,13 @@
 DHCP、空 listeners、网络身份和 peer）。不要额外添加 `hostname` 或 `[flags]`，
 测试会自动设置主机名 `mac_test` 和 `no_tun = true`。
 
-Run workflow 时勾选 `network_test`。构建完成后测试会启动真实内嵌核心，等待
+Run workflow 时选择 `mode = network-test`。测试只构建当前架构的 Debug 应用，然后启动真实内嵌核心，等待
 DHCP IP 和至少一条活动连接，然后保持在线 5 分钟。看到日志“mac_test 已入网”
 后，可在你的本地客户端查看该节点。测试结束会停止核心，节点会离线。
 
-这个测试验证 GitHub macOS 环境下的核心入网和节点发现，不创建 TUN，不能
-用本机 ping 虚拟 IP 的结果判断此测试成败。TUN、虚拟 IP 通信和下载后的权限
+这个测试验证 GitHub macOS 环境下的核心入网和节点发现，不创建 TUN。上游核心
+在无 TUN 模式下仍可回复发往自身虚拟 IP 的 ping，因此 ping 通不代表已创建系统网卡。
+TUN、系统应用的虚拟 IP 通信和下载后的权限
 流程仍按下面步骤在真实 Mac 上验证。取消 Action 或超时后 runner 也会结束。
 
 ## 在 Mac 上运行测试包

@@ -1,15 +1,15 @@
-name: macOS Demo 打包
+name: macOS 构建与测试
 
 on:
   workflow_dispatch:
     inputs:
-      network_test:
-        description: 执行真实入网测试并保持在线 5 分钟（需 MACOS_TEST_TOML Secret）
-        required: false
-        default: false
-        type: boolean
+      mode:
+        description: 只测试、只打包，或分别运行两者
+        type: choice
+        options: [network-test, package, both]
+        default: network-test
       flutter_version:
-        description: Flutter 版本（留空使用 stable；须满足 pubspec 的 Dart 版本要求）
+        description: Flutter 版本（留空使用 stable）
         required: false
         default: ''
         type: string
@@ -18,88 +18,101 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  macos:
+    name: macOS / ${{ matrix.mode }}
     runs-on: macos-15
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: ${{ fromJSON(inputs.mode == 'both' && '["package","network-test"]' || inputs.mode == 'package' && '["package"]' || '["network-test"]') }}
+    env:
+      CARGOKIT_CI_TARGET_DIR: ${{ github.workspace }}/.ci-rust/${{ matrix.mode }}
     steps:
-      - name: 获取代码
-        uses: actions/checkout@v4
-
-      - name: 安装 Flutter
-        uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v4
+      - name: 检查测试配置
+        if: matrix.mode == 'network-test'
+        env:
+          MACOS_TEST_TOML: ${{ secrets.MACOS_TEST_TOML }}
+        run: test -n "$MACOS_TEST_TOML" || { echo '请先设置 MACOS_TEST_TOML Secret'; exit 1; }
+      - uses: subosito/flutter-action@v2
         with:
           channel: stable
           flutter-version: ${{ inputs.flutter_version }}
           cache: true
-
-      - name: 安装 Rust 和编译依赖
+      - name: 安装编译依赖
         shell: bash
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin
+          if [ '${{ matrix.mode }}' = package ]; then rustup target add x86_64-apple-darwin; fi
           brew list protobuf >/dev/null 2>&1 || brew install protobuf
           echo "PROTOC=$(command -v protoc)" >> "$GITHUB_ENV"
           echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV"
-          flutter --version
-          rustc --version
-          xcodebuild -version
-
-      - name: 缓存 Rust 依赖和编译中间文件
-        uses: actions/cache@v4
+      - name: 生成工具链标识
+        id: toolchain
+        shell: bash
+        run: |
+          identity=$( { rustc -Vv; xcodebuild -version; flutter --version; protoc --version; } | shasum -a 256 | awk '{print $1}')
+          echo "id=$identity" >> "$GITHUB_OUTPUT"
+      - name: 恢复 Rust 缓存
+        id: rust-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            example/build/macos/Build/Intermediates.noindex/Pods.build/Release/rust_lib_easytier_frb.build
-          key: macos-15-rust-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml', 'rust/src/**', 'rust/build.rs', 'cargokit/**') }}
+            .ci-rust/${{ matrix.mode }}
+          key: macos-rust-v2-${{ matrix.mode }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml', 'rust/src/**', 'rust/build.rs') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            macos-15-rust-
-
-      - name: 检查 Dart 代码
-        run: |
-          flutter pub get
-          flutter analyze --no-pub
-          flutter test --no-pub
-          cd example
-          flutter pub get
-          flutter test --no-pub
-
-      - name: 构建 macOS 测试应用
+            macos-rust-v2-${{ matrix.mode }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml', 'rust/src/**', 'rust/build.rs') }}-
+            macos-rust-v2-${{ matrix.mode }}-${{ steps.toolchain.outputs.id }}-
+      - name: 获取依赖
+        working-directory: example
+        run: flutter pub get
+      - name: 构建双架构测试包
+        if: matrix.mode == 'package'
         working-directory: example
         run: flutter build macos --release
-
-      - name: 真实入网测试（无 TUN）
-        if: ${{ inputs.network_test }}
+      - name: 立即压缩应用
+        if: matrix.mode == 'package'
+        shell: bash
+        run: |
+          app="example/build/macos/Build/Products/Release/easytier_frb_example.app"
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent "$app" dist/easytier-demo-macos-universal.zip
+          cp docs/MACOS_TEST.md dist/测试说明.md
+          shasum -a 256 dist/easytier-demo-macos-universal.zip > dist/SHA256SUMS.txt
+      - name: 上传测试包（检查失败也保留）
+        if: matrix.mode == 'package' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: easytier-demo-macos-universal
+          path: dist/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: 检查双架构
+        if: matrix.mode == 'package'
+        run: lipo example/build/macos/Build/Products/Release/easytier_frb_example.app/Contents/MacOS/easytier_frb_example -verify_arch arm64 x86_64
+      - name: 真实入网测试（当前架构、无 TUN）
+        if: matrix.mode == 'network-test'
         working-directory: example
         shell: bash
         env:
           MACOS_TEST_TOML: ${{ secrets.MACOS_TEST_TOML }}
         run: |
-          test -n "$MACOS_TEST_TOML" || { echo '请先设置 MACOS_TEST_TOML Secret'; exit 1; }
           config_file="$RUNNER_TEMP/macos-network-test.json"
           trap 'rm -f "$config_file"' EXIT
-          # 多行 TOML 必须编码为单行，避免 flutter drive 的编译参数解析失败。
           jq -n '{MACOS_TEST_TOML_BASE64: (env.MACOS_TEST_TOML | @base64)}' > "$config_file"
           echo "::add-mask::$(jq -r '.MACOS_TEST_TOML_BASE64' "$config_file")"
           flutter drive --driver=../test_driver/integration_test.dart --target=integration_test/macos_network_test.dart -d macos --dart-define-from-file="$config_file"
-
-      - name: 检查架构并压缩应用
-        shell: bash
-        run: |
-          app="example/build/macos/Build/Products/Release/easytier_frb_example.app"
-          executable="$app/Contents/MacOS/easytier_frb_example"
-          test -f "$executable"
-          lipo -verify_arch arm64 x86_64 "$executable"
-          mkdir -p dist
-          ditto -c -k --sequesterRsrc --keepParent "$app" dist/easytier-demo-macos-universal.zip
-          cp docs/MACOS_TEST.md dist/测试说明.md
-          shasum -a 256 dist/easytier-demo-macos-universal.zip > dist/SHA256SUMS.txt
-
-      - name: 上传测试包
-        uses: actions/upload-artifact@v4
+      - name: 保存 Rust 缓存（失败时也保存）
+        if: ${{ !cancelled() && steps.rust-cache.outcome == 'success' }}
+        uses: actions/cache/save@v4
         with:
-          name: easytier-demo-macos-universal
-          path: dist/
-          if-no-files-found: error
-          retention-days: 14
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .ci-rust/${{ matrix.mode }}
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
