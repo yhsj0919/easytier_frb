@@ -61,9 +61,8 @@ jobs:
           gem install xcodeproj -v 1.27.0 --no-document --install-dir "$RUNNER_TEMP/ios-ruby-gems"
           ruby -c example/ios/setup_tunnel.rb
           GEM_PATH="$RUNNER_TEMP/ios-ruby-gems" ruby example/ios/setup_tunnel.rb
-          # 构建前确认 Xcode 实际解析的名称，避免重复等待编译才发现输出错误。
-          xcodebuild -project example/ios/Runner.xcodeproj -target EasyTierTunnel -configuration Release -showBuildSettings > "$RUNNER_TEMP/ios-tunnel-settings.txt"
-          grep -E '^[[:space:]]*FULL_PRODUCT_NAME = EasyTierTunnel\.appex$' "$RUNNER_TEMP/ios-tunnel-settings.txt"
+          # 此时 Flutter 尚未生成 Swift Package 目录，不提前调用 xcodebuild。
+          # 扩展名称由脚本设置，实际 .appex 和可执行文件在打包步骤检查。
       - name: 检查 IPv6 和 DNS 设置逻辑
         run: |
           swiftc example/ios/EasyTierTunnel/TunnelAddress.swift example/ios/tests/main.swift -o "$RUNNER_TEMP/ios-settings-check"
