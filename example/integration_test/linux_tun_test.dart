@@ -109,9 +109,24 @@ void main() {
 }
 
 Future<String> _adb(List<String> arguments) async {
-  final result = await Process.run('timeout', ['20s', 'adb', ...arguments]);
+  final result = await Process.run('timeout', [
+    '20s',
+    'adb',
+    '-P',
+    '15037',
+    ...arguments,
+  ]);
   if (result.exitCode != 0) {
-    throw StateError('ADB 操作失败或超时，请检查服务和设备授权');
+    final target = Platform.environment['LINUX_TEST_ADB_TARGET'] ?? '';
+    var details = '${result.stdout}\n${result.stderr}'.trim();
+    if (target.isNotEmpty) details = details.replaceAll(target, '[隐藏]');
+    details = details.replaceAll(
+      RegExp(r'\b(?:\d{1,3}\.){3}\d{1,3}\b'),
+      '[隐藏IP]',
+    );
+    // 只打印固定的操作名，不打印包含设备地址的完整参数。
+    final operation = arguments.first == '-s' ? arguments[2] : arguments.first;
+    throw StateError('ADB $operation 失败（退出码 ${result.exitCode}）：$details');
   }
   return result.stdout.toString();
 }
