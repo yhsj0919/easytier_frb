@@ -1,0 +1,85 @@
+name: macOS Demo 打包
+
+on:
+  workflow_dispatch:
+    inputs:
+      flutter_version:
+        description: Flutter 版本（留空使用 stable；须满足 pubspec 的 Dart 版本要求）
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: 获取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ inputs.flutter_version }}
+          cache: true
+
+      - name: 安装 Rust 和编译依赖
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          brew list protobuf >/dev/null 2>&1 || brew install protobuf
+          echo "PROTOC=$(command -v protoc)" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV"
+          flutter --version
+          rustc --version
+          xcodebuild -version
+
+      - name: 缓存 Rust 依赖和编译中间文件
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            example/build/macos/Build/Intermediates.noindex/Pods.build/Release/rust_lib_easytier_frb.build
+          key: macos-15-rust-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml', 'rust/src/**', 'rust/build.rs', 'cargokit/**') }}
+          restore-keys: |
+            macos-15-rust-
+
+      - name: 检查 Dart 代码
+        run: |
+          flutter pub get
+          flutter analyze --no-pub
+          flutter test --no-pub
+          cd example
+          flutter pub get
+          flutter test --no-pub
+
+      - name: 构建 macOS 测试应用
+        working-directory: example
+        run: flutter build macos --release
+
+      - name: 检查架构并压缩应用
+        shell: bash
+        run: |
+          app="example/build/macos/Build/Products/Release/easytier_frb_example.app"
+          executable="$app/Contents/MacOS/easytier_frb_example"
+          test -f "$executable"
+          lipo -verify_arch arm64 x86_64 "$executable"
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent "$app" dist/easytier-demo-macos-universal.zip
+          cp docs/MACOS_TEST.md dist/测试说明.md
+          shasum -a 256 dist/easytier-demo-macos-universal.zip > dist/SHA256SUMS.txt
+
+      - name: 上传测试包
+        uses: actions/upload-artifact@v4
+        with:
+          name: easytier-demo-macos-universal
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

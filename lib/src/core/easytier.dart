@@ -366,7 +366,7 @@ final class EasyTier extends ChangeNotifier {
     if (ipv4.isEmpty || ipv4 == '0.0.0.0') {
       throw const EasyTierException(
         code: EasyTierErrorCode.coreStartFailed,
-        message: '等待 EasyTier 分配虚拟 IPv4 超时；请在 TOML 中填写 ipv4，或检查 DHCP 和 peer。',
+        message: '组网启动超时，尚未获取虚拟 IP。请先检查服务器地址（peer）是否正确、网络是否可用；服务器可连接时，再检查组网配置和 DHCP。',
         recoverable: true,
       );
     }

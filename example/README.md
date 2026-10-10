@@ -22,6 +22,8 @@ flutter run -d android
 
 ## 修改配置
 
+macOS 的 GitHub Actions 打包与管理员运行方式见 [macOS 测试说明](../docs/MACOS_TEST.md)。
+
 页面中央的编辑器就是实际传给核心的 TOML。两台设备要加入同一个网络，必须使用相同的 `network_name` 和 `network_secret`，并保证至少一个 `peer` 可以访问。示例中的值只是占位符，无法直接连接。
 
 原生集成测试位于 `integration_test/simple_test.dart`。

@@ -240,7 +240,7 @@ final class EasyTierSession {
     } on TimeoutException catch (error) {
       final failure = EasyTierException(
         code: EasyTierErrorCode.startupTimeout,
-        message: '等待 EasyTier 分配虚拟 IPv4 超时，请检查 peer、DHCP 和网络连接。',
+        message: '组网启动超时，尚未获取虚拟 IP。请先检查服务器地址（peer）是否正确、网络是否可用；服务器可连接时，再检查组网配置和 DHCP。',
         technicalDetails: '等待时间：${timeout.inSeconds} 秒',
         recoverable: true,
         cause: error,
